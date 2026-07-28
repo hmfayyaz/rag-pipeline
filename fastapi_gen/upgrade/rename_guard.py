@@ -1,0 +1,156 @@
+"""Release guard: fail if a file move lacks an ``UPGRADES.yaml`` rename entry.
+
+``UPGRADES.yaml`` is only as reliable as the discipline behind it — a forgotten
+``renames`` block silently degrades to delete+add and loses client edits. This guard
+(run in CI on every release) diffs the previous release's template tree against the
+candidate's, finds likely moves (a deletion + an addition of similar content), and
+requires each to be covered by a ``renames`` entry or an explicit waiver.
+"""
+
+from __future__ import annotations
+
+import difflib
+from dataclasses import dataclass
+from pathlib import Path
+
+DEFAULT_THRESHOLD = 0.5
+
+_MIN_MATCH_LEN = 8
+
+_SLUG_PREFIX = "{{cookiecutter.project_slug}}/"
+
+
+@dataclass(frozen=True)
+class Move:
+    from_path: str
+    to_path: str
+    similarity: float
+
+
+def _strip_slug(rel: str) -> str:
+    return rel[len(_SLUG_PREFIX) :] if rel.startswith(_SLUG_PREFIX) else rel
+
+
+def template_files(template_dir: Path) -> dict[str, str]:
+    """Map rendered-relative path → file text for a template's project subtree."""
+    files: dict[str, str] = {}
+    for path in template_dir.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        rel = path.relative_to(template_dir).as_posix()
+        if not rel.startswith(_SLUG_PREFIX):
+            continue
+        try:
+            files[_strip_slug(rel)] = path.read_text(encoding="utf-8", errors="surrogateescape")
+        except OSError:
+            continue
+    return files
+
+
+def detect_moves(
+    old_files: dict[str, str],
+    new_files: dict[str, str],
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+) -> list[Move]:
+    """Pair deletions with additions by content similarity to infer moves.
+
+    Greedy best-match: each deleted path is matched to its most-similar addition
+    above ``threshold``; each addition is claimed at most once.
+    """
+    deleted = sorted(set(old_files) - set(new_files))
+    added = sorted(set(new_files) - set(old_files))
+    moves: list[Move] = []
+    claimed: set[str] = set()
+
+    for old_path in deleted:
+        best_ratio, best_new = 0.0, None
+        old_text = old_files[old_path]
+        if len(old_text) < _MIN_MATCH_LEN:
+            continue
+        for new_path in added:
+            if new_path in claimed:
+                continue
+            new_text = new_files[new_path]
+            if len(new_text) < _MIN_MATCH_LEN:
+                continue
+            # ratio() is quadratic in file size and this loop is len(deleted) x
+            # len(added), so a release that reshuffles a directory would turn the
+            # guard into a multi-minute CI job. Both filters below are upper bounds
+            # on the real ratio, so skipping on them changes the cost, never the
+            # result. The length bound is difflib's own real_quick_ratio, computed
+            # before the matcher exists (construction indexes the whole second
+            # string). A naive min/max length ratio would be too aggressive and
+            # could drop a genuine move.
+            total = len(old_text) + len(new_text)
+            if 2 * min(len(old_text), len(new_text)) < threshold * total:
+                continue
+            matcher = difflib.SequenceMatcher(None, old_text, new_text)
+            if matcher.quick_ratio() < threshold:
+                continue
+            ratio = matcher.ratio()
+            if ratio > best_ratio:
+                best_ratio, best_new = ratio, new_path
+        if best_new is not None and best_ratio >= threshold:
+            claimed.add(best_new)
+            moves.append(Move(old_path, best_new, round(best_ratio, 3)))
+    return moves
+
+
+def recorded_waivers(blocks: list[dict]) -> set[str]:
+    """Paths a maintainer declared an *intentional* delete+add, not a rename.
+
+    Read from the ``removed:`` / ``waived:`` keys of the UPGRADES.yaml blocks. Both
+    the CI guard and the recorder must consult this: if only the guard did, a waived
+    pair would be re-detected by ``record_renames`` and written back as a rename —
+    CI would then pass because the move is "covered", and the upgrade would move the
+    client's copy of a genuinely-deleted file onto an unrelated path.
+    """
+    return {
+        path for block in blocks for key in ("removed", "waived") for path in (block.get(key) or [])
+    }
+
+
+def format_renames_block(version: str, moves: list[Move]) -> str:
+    """Render moves as a ready-to-paste ``UPGRADES.yaml`` release block."""
+    lines = [f'- version: "{version}"', "  renames:"]
+    for move in moves:
+        lines.append(f'    - from: "{move.from_path}"')
+        lines.append(f'      to:   "{move.to_path}"')
+    return "\n".join(lines) + "\n"
+
+
+def covering_rename(move: Move, known_renames: set[tuple[str, str]]) -> tuple[str, str] | None:
+    """The UPGRADES.yaml renames entry that covers ``move``, or ``None``.
+
+    A directory rename ``a/ → b/`` covers any file move whose paths sit under those
+    prefixes. Callers need the entry itself, not just a yes/no: the version a move is
+    recorded under lives on that entry, and for a directory rename it is not keyed by
+    the file's own paths. ``sorted`` keeps the pick deterministic when several
+    directory entries match.
+    """
+    if (move.from_path, move.to_path) in known_renames:
+        return (move.from_path, move.to_path)
+    for frm, to in sorted(known_renames):
+        if (
+            frm.endswith("/")
+            and to.endswith("/")
+            and move.from_path.startswith(frm)
+            and move.to_path.startswith(to)
+        ):
+            return (frm, to)
+    return None
+
+
+def uncovered_moves(
+    moves: list[Move],
+    known_renames: set[tuple[str, str]],
+    waivers: set[str] | None = None,
+) -> list[Move]:
+    """Return moves lacking a matching UPGRADES.yaml rename entry or waiver."""
+    waivers = waivers or set()
+    return [
+        move
+        for move in moves
+        if move.from_path not in waivers and covering_rename(move, known_renames) is None
+    ]
