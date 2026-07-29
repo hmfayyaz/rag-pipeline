@@ -310,12 +310,10 @@ class DocumentProcessor:
                 separators=["\n"],
             )
 
-        # Default: recursive (smart splitting by paragraphs, sentences, words)
-        return RecursiveCharacterTextSplitter(
+        # Default: recursive (smart token splitting by paragraphs, sentences, words)
+        return RecursiveCharacterTextSplitter.from_tiktoken_encoder(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
-            length_function=len,
-            is_separator_regex=False,
         )
 
     async def process_file(self, filepath: Path) -> Document:

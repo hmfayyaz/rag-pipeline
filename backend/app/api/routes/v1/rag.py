@@ -209,10 +209,14 @@ async def ingest_file(
     name: str,
     rag_doc_svc: RAGDocumentSvc,
     vector_store: VectorStoreSvc,
-    _: CurrentAdmin,
+    admin: CurrentAdmin,
     active_org: ActiveOrg,
     file: UploadFile = File(...),
     replace: bool = Query(False),
+    area: str | None = Query(None, description="Department/Area of the document"),
+    language: str | None = Query("en", description="Language of the document"),
+    confidentiality: str | None = Query("public", description="Confidentiality level"),
+    permissions: str | None = Query("read", description="Access permissions constraint"),
 ) -> Any:
     """Upload and queue a file for ingestion into a collection."""
     data = await file.read()
@@ -223,6 +227,11 @@ async def ingest_file(
         replace=replace,
         vector_store=vector_store,
         organization_id=active_org.id,
+        owner_id=admin.id,
+        area=area,
+        language=language,
+        confidentiality=confidentiality,
+        permissions=permissions,
     )
 
 

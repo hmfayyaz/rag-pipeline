@@ -155,9 +155,8 @@ class QdrantVectorStore(BaseVectorStore):
         self.client = AsyncQdrantClient(
             host=app_settings.QDRANT_HOST,
             port=app_settings.QDRANT_PORT,
-            # QDRANT_API_KEY is str | None; pass directly without `or None`
-            # to avoid silently coercing empty strings to None.
-            api_key=app_settings.QDRANT_API_KEY,
+            api_key=app_settings.QDRANT_API_KEY or None,
+            https=False,
         )
 
     async def _ensure_collection(self, name: str) -> None:
@@ -169,6 +168,27 @@ class QdrantVectorStore(BaseVectorStore):
                     size=self.settings.embeddings_config.dim,
                     distance=Distance.COSINE,
                 ),
+            )
+            # Create payload indexes for metadata filtering
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.tenant_id",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.confidentiality",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.area",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.owner",
+                field_schema="keyword",
             )
 
     async def insert_document(self, collection_name: str, document: Document) -> None:

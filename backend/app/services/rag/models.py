@@ -34,6 +34,12 @@ class DocumentMetadata(BaseModel):
     filetype: str
     source_path: str = ""  # original path: local path, s3://bucket/key, gdrive://file_id
     content_hash: str = ""  # SHA256 hash for deduplication
+    tenant_id: str | None = None
+    area: str | None = None
+    owner: str | None = None
+    language: str | None = None
+    confidentiality: str | None = None
+    permissions: str | None = None
     additional_info: dict[str, Any] | None = None
 
 

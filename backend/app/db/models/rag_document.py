@@ -43,3 +43,13 @@ class RAGDocument(TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    area: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    language: Mapped[str | None] = mapped_column(String(10), nullable=True, default="en")
+    confidentiality: Mapped[str | None] = mapped_column(String(50), nullable=True, default="public", index=True)
+    permissions: Mapped[str | None] = mapped_column(String(50), nullable=True, default="read")

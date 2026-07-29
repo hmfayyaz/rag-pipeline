@@ -79,6 +79,12 @@ class IngestionService:
         collection_name: str,
         replace: bool = True,
         source_path: str = "",
+        tenant_id: str | None = None,
+        area: str | None = None,
+        owner: str | None = None,
+        language: str | None = "en",
+        confidentiality: str | None = "public",
+        permissions: str | None = "read",
     ) -> IngestionResult:
         """`source_path` accepts URI schemes like gdrive://id or s3://bucket/key."""
         try:
@@ -87,6 +93,14 @@ class IngestionService:
             if source_path:
                 document.metadata.source_path = source_path
                 document.metadata.filename = Path(source_path).name
+
+            # Map multi-tenant and access control metadata parameters
+            document.metadata.tenant_id = tenant_id
+            document.metadata.area = area
+            document.metadata.owner = owner
+            document.metadata.language = language
+            document.metadata.confidentiality = confidentiality
+            document.metadata.permissions = permissions
 
             existing_id = None
             if replace:

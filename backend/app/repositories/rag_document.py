@@ -63,6 +63,11 @@ async def create(
     status: str = "processing",
     organization_id: UUID | None = None,
     knowledge_base_id: UUID | None = None,
+    owner_id: UUID | None = None,
+    area: str | None = None,
+    language: str | None = "en",
+    confidentiality: str | None = "public",
+    permissions: str | None = "read",
 ) -> RAGDocument:
     """Create a new RAG document record."""
     doc = RAGDocument(
@@ -74,6 +79,11 @@ async def create(
         status=status,
         organization_id=organization_id,
         knowledge_base_id=knowledge_base_id,
+        owner_id=owner_id,
+        area=area,
+        language=language,
+        confidentiality=confidentiality,
+        permissions=permissions,
     )
     db.add(doc)
     await db.flush()

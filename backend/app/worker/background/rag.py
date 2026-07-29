@@ -28,11 +28,28 @@ async def ingest_document_in_background(
     from app.services.rag_document import RAGDocumentService
 
     try:
+        async with get_db_context() as db:
+            rag_doc_service = RAGDocumentService(db)
+            rag_doc = await rag_doc_service.get_document(rag_document_id)
+            
+            tenant_id = str(rag_doc.organization_id) if rag_doc.organization_id else None
+            owner = str(rag_doc.owner_id) if rag_doc.owner_id else None
+            area = rag_doc.area
+            language = rag_doc.language
+            confidentiality = rag_doc.confidentiality
+            permissions = rag_doc.permissions
+
         result = await IngestionService.from_settings().ingest_file(
             filepath=Path(filepath),
             collection_name=collection_name,
             replace=replace,
             source_path=source_path,
+            tenant_id=tenant_id,
+            area=area,
+            owner=owner,
+            language=language,
+            confidentiality=confidentiality,
+            permissions=permissions,
         )
         async with get_db_context() as db:
             await RAGDocumentService(db).complete_ingestion(
