@@ -31,12 +31,22 @@ class BaseRetrievalService(ABC):
         limit: int = 5,
         min_score: float = 0.0,
         filter: str = "",
+        tenant_id: str | None = None,
+        role: str | None = None,
+        current_user_id: str | None = None,
     ) -> list[SearchResult]:
         pass
 
     @abstractmethod
     async def retrieve_by_document(
-        self, query: str, collection_name: str, document_id: str, limit: int = 3
+        self,
+        query: str,
+        collection_name: str,
+        document_id: str,
+        limit: int = 3,
+        tenant_id: str | None = None,
+        role: str | None = None,
+        current_user_id: str | None = None,
     ) -> list[SearchResult]:
         pass
 
@@ -122,6 +132,65 @@ class RetrievalService(BaseRetrievalService):
             if s > 0
         ]
 
+    def _build_security_filter(
+        self,
+        tenant_id: str | None,
+        role: str | None,
+        current_user_id: str | None,
+    ) -> Any:
+        import re
+        from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
+
+        # Deny by default: if tenant_id is missing, restrict to a non-existent org
+        if not tenant_id:
+            logger.warning("[RETRIEVAL] tenant_id is missing in query context! Denying access by default.")
+            return Filter(
+                must=[FieldCondition(key="metadata.tenant_id", match=MatchValue(value="DENY_ALL"))]
+            )
+
+        must_conditions = [
+            FieldCondition(key="metadata.tenant_id", match=MatchValue(value=str(tenant_id)))
+        ]
+
+        # RBAC permissions filtering
+        if role == "viewer":
+            must_conditions.append(
+                FieldCondition(
+                    key="metadata.permissions",
+                    match=MatchAny(any=["viewer-only", "viewer", "read", "public"])
+                )
+            )
+        elif role == "member":
+            must_conditions.append(
+                FieldCondition(
+                    key="metadata.permissions",
+                    match=MatchAny(any=["viewer-only", "viewer", "read", "public", "member-only", "member"])
+                )
+            )
+        # Admins and Owners bypass permissions checks.
+
+        # Confidentiality filtering: restrict high confidentiality to document owner or organization owner
+        if role != "owner":
+            user_val = str(current_user_id) if current_user_id else "DENY_ALL"
+            must_conditions.append(
+                Filter(
+                    should=[
+                        # Option A: Document confidentiality is NOT high
+                        FieldCondition(
+                            key="metadata.confidentiality",
+                            match=MatchAny(any=["low", "medium", "public"])
+                        ),
+                        # Option B: Document belongs to the user
+                        FieldCondition(
+                            key="metadata.owner",
+                            match=MatchValue(value=user_val)
+                        )
+                    ]
+                )
+            )
+
+        return Filter(must=must_conditions)
+
     async def retrieve(
         self,
         query: str,
@@ -130,28 +199,44 @@ class RetrievalService(BaseRetrievalService):
         min_score: float = 0.0,
         filter: str = "",
         use_reranker: bool = False,
+        tenant_id: str | None = None,
+        role: str | None = None,
+        current_user_id: str | None = None,
     ) -> list[SearchResult]:
+        import re
         should_rerank = use_reranker and self._reranker_enabled
 
         # Fetch 3x when reranking: gives the reranker room to eliminate weak candidates
         fetch_multiplier = 3 if should_rerank else 2
 
         logger.info(
-            "[RETRIEVAL] Query: '%.50s...', collection: %s, limit: %d, filter: '%s', rerank: %s",
+            "[RETRIEVAL] Query: '%.50s...', collection: %s, limit: %d, filter: '%s', rerank: %s, tenant: %s, role: %s",
             query,
             collection_name,
             limit,
             filter,
             should_rerank,
+            tenant_id,
+            role,
         )
 
         start_time = time.time()
 
+        # Build security and access control filters
+        qdrant_filter = self._build_security_filter(tenant_id, role, current_user_id)
+        if filter and "parent_doc_id" in filter:
+            m = re.search(r'parent_doc_id\s*==\s*"([^"]+)"', filter)
+            if m:
+                from qdrant_client.models import FieldCondition, MatchValue
+                qdrant_filter.must.append(
+                    FieldCondition(key="parent_doc_id", match=MatchValue(value=m.group(1)))
+                )
+
         pipeline_results = await self.store.search(
             collection_name=collection_name,
             query=query,
-            filter_expr=filter,
             limit=limit * fetch_multiplier,
+            query_filter=qdrant_filter,
         )
 
         search_time = time.time() - start_time
@@ -236,6 +321,9 @@ class RetrievalService(BaseRetrievalService):
         limit: int = 5,
         min_score: float = 0.0,
         use_reranker: bool = False,
+        tenant_id: str | None = None,
+        role: str | None = None,
+        current_user_id: str | None = None,
     ) -> list[SearchResult]:
         all_results: list[SearchResult] = []
         for name in collection_names:
@@ -246,6 +334,9 @@ class RetrievalService(BaseRetrievalService):
                     limit=limit,
                     min_score=min_score,
                     use_reranker=use_reranker,
+                    tenant_id=tenant_id,
+                    role=role,
+                    current_user_id=current_user_id,
                 )
                 # Tag results with collection name in metadata
                 for r in results:
@@ -273,17 +364,22 @@ class RetrievalService(BaseRetrievalService):
         document_id: str,
         limit: int = 3,
         use_reranker: bool = False,
+        tenant_id: str | None = None,
+        role: str | None = None,
+        current_user_id: str | None = None,
     ) -> list[SearchResult]:
         """Retrieve chunks restricted to a single document."""
         # Sanitize document_id to prevent filter injection
         sanitized_id = document_id.replace('"', "").replace("\\", "")
         filter_expr = f'parent_doc_id == "{sanitized_id}"'
         logger.info(
-            "[RETRIEVAL] Retrieve by document: doc_id=%s, query='%.30s...', limit=%d, rerank=%s",
+            "[RETRIEVAL] Retrieve by document: doc_id=%s, query='%.30s...', limit=%d, rerank=%s, tenant=%s, role=%s",
             document_id,
             query,
             limit,
             use_reranker,
+            tenant_id,
+            role,
         )
         return await self.retrieve(
             query=query,
@@ -291,4 +387,7 @@ class RetrievalService(BaseRetrievalService):
             limit=limit,
             filter=filter_expr,
             use_reranker=use_reranker,
+            tenant_id=tenant_id,
+            role=role,
+            current_user_id=current_user_id,
         )

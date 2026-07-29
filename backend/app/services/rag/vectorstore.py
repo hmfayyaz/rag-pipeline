@@ -25,7 +25,12 @@ class BaseVectorStore(ABC):
 
     @abstractmethod
     async def search(
-        self, collection_name: str, query: str, limit: int = 4, filter_expr: str = ""
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 4,
+        filter_expr: str = "",
+        query_filter: Any = None,
     ) -> list[SearchResult]:
         pass
 
@@ -211,19 +216,24 @@ class QdrantVectorStore(BaseVectorStore):
         await self.client.upsert(collection_name=collection_name, points=points)
 
     async def search(
-        self, collection_name: str, query: str, limit: int = 4, filter_expr: str = ""
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 4,
+        filter_expr: str = "",
+        query_filter: Any = None,
     ) -> list[SearchResult]:
         query_vector = self.embedder.embed_query(query)
-        qdrant_filter = None
-        if filter_expr and "parent_doc_id" in filter_expr:
+        qdrant_filter = query_filter
+        if not qdrant_filter and filter_expr and "parent_doc_id" in filter_expr:
             m = re.search(r'parent_doc_id\s*==\s*"([^"]+)"', filter_expr)
             if m:
                 qdrant_filter = Filter(
                     must=[FieldCondition(key="parent_doc_id", match=MatchValue(value=m.group(1)))]
                 )
-        results = await self.client.search(
+        results = await self.client.query_points(
             collection_name=collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             query_filter=qdrant_filter,
         )
@@ -234,7 +244,7 @@ class QdrantVectorStore(BaseVectorStore):
                 metadata=hit.payload.get("metadata", {}),
                 parent_doc_id=hit.payload.get("parent_doc_id"),
             )
-            for hit in results
+            for hit in results.points
         ]
 
     async def get_collection_info(self, collection_name: str) -> CollectionInfo:

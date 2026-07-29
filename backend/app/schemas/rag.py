@@ -172,3 +172,30 @@ class RAGSyncResponse(BaseSchema):
 class SupportedFormatsResponse(BaseSchema):
     parser: str
     formats: list[str]
+
+
+class RAGQueryRequest(BaseSchema):
+    """Parameters for a RAG retrieval and generation query."""
+
+    collection_name: str = Field("documents", description="Target collection for search")
+    query: str = Field(..., description="Natural language question to ask")
+    limit: int = Field(default=4, ge=1, le=20, description="Max context chunks to retrieve")
+    min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    use_reranker: bool = Field(default=False, description="Whether to use reranking")
+
+
+class RAGQueryCitation(BaseSchema):
+    """Citation of a retrieved document chunk supporting the answer."""
+
+    content: str = Field(..., description="The chunk text context")
+    score: float = Field(..., description="Confidence/relevance score")
+    filename: str = Field(..., description="Source document filename")
+    page_num: int | None = Field(None, description="Page number of source document")
+    parent_doc_id: str = Field(..., description="Parent document identifier")
+
+
+class RAGQueryResponse(BaseSchema):
+    """RAG generated answer with supporting context citations."""
+
+    answer: str = Field(..., description="The generated answer from LLM")
+    citations: list[RAGQueryCitation] = Field(..., description="List of source chunks used for answer")

@@ -16,6 +16,7 @@ from app.api.deps import (
     ActiveOrg,
     CurrentAdmin,
     CurrentUser,
+    DBSession,
     IngestionSvc,
     KnowledgeBaseSvc,
     RAGDocumentSvc,
@@ -32,6 +33,9 @@ from app.schemas.rag import (
     RAGDocumentList,
     RAGIngestResponse,
     RAGMessageResponse,
+    RAGQueryCitation,
+    RAGQueryRequest,
+    RAGQueryResponse,
     RAGRetryResponse,
     RAGSearchRequest,
     RAGSearchResponse,
@@ -151,10 +155,16 @@ async def list_documents(
 async def search_documents(
     request: RAGSearchRequest,
     retrieval_service: RetrievalSvc,
-    _: CurrentUser,
+    current_user: CurrentUser,
+    active_org: ActiveOrg,
+    db: DBSession,
     use_reranker: bool = Query(False, description="Whether to use reranking (if configured)"),
 ) -> Any:
-    """Search for relevant document chunks. Supports multi-collection search."""
+    """Search for relevant document chunks. Supports multi-collection search with tenant and RBAC checks."""
+    from app.repositories import member_repo
+    membership = await member_repo.get(db, organization_id=active_org.id, user_id=current_user.id)
+    role = membership.role if membership else "viewer"
+
     if request.collection_names and len(request.collection_names) > 1:
         results = await retrieval_service.retrieve_multi(
             query=request.query,
@@ -162,6 +172,9 @@ async def search_documents(
             limit=request.limit,
             min_score=request.min_score,
             use_reranker=use_reranker,
+            tenant_id=str(active_org.id),
+            role=role,
+            current_user_id=str(current_user.id),
         )
     else:
         collection = (
@@ -174,9 +187,89 @@ async def search_documents(
             min_score=request.min_score,
             filter=request.filter or "",
             use_reranker=use_reranker,
+            tenant_id=str(active_org.id),
+            role=role,
+            current_user_id=str(current_user.id),
         )
     api_results = [RAGSearchResult(**hit.model_dump()) for hit in results]
     return RAGSearchResponse(results=api_results)
+
+
+@router.post("/query", response_model=RAGQueryResponse)
+async def query_knowledge_base(
+    request: RAGQueryRequest,
+    retrieval_service: RetrievalSvc,
+    current_user: CurrentUser,
+    active_org: ActiveOrg,
+    db: DBSession,
+) -> Any:
+    """Query the RAG pipeline to retrieve relevant chunks and generate a security-gated answer using the local LLM."""
+    from langchain_openai import ChatOpenAI
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from app.repositories import member_repo
+
+    # Resolve membership role
+    membership = await member_repo.get(db, organization_id=active_org.id, user_id=current_user.id)
+    role = membership.role if membership else "viewer"
+
+    # 1. Retrieve security-filtered document chunks
+    results = await retrieval_service.retrieve(
+        query=request.query,
+        collection_name=request.collection_name,
+        limit=request.limit,
+        min_score=request.min_score,
+        use_reranker=request.use_reranker,
+        tenant_id=str(active_org.id),
+        role=role,
+        current_user_id=str(current_user.id),
+    )
+
+    # 2. Build citations list
+    citations = [
+        RAGQueryCitation(
+            content=hit.content,
+            score=hit.score,
+            filename=hit.metadata.get("filename", "Unknown"),
+            page_num=hit.metadata.get("page_num"),
+            parent_doc_id=hit.parent_doc_id,
+        )
+        for hit in results
+    ]
+
+    # 3. Grounded generation
+    if not results:
+        answer = "I could not find any relevant or permitted documents matching your query in the database."
+    else:
+        context_str = "\n\n".join([
+            f"Document: {hit.metadata.get('filename', 'Unknown')}\n"
+            f"Page: {hit.metadata.get('page_num', 'N/A')}\n"
+            f"Content: {hit.content}"
+            for hit in results
+        ])
+        
+        system_prompt = (
+            "You are a helpful AI assistant. Answer the user's question using ONLY the provided document context below.\n"
+            "If the answer cannot be found in the context, state that you do not know the answer based on the documents.\n"
+            "Always base your answers strictly on the facts provided in the context.\n\n"
+            f"--- CONTEXT ---\n{context_str}\n--- END CONTEXT ---"
+        )
+        
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=request.query)
+        ]
+        
+        model = ChatOpenAI(
+            model=settings.AI_MODEL,
+            temperature=0.0,
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.OPENAI_API_BASE or None,
+        )
+        
+        response = await model.ainvoke(messages)
+        answer = response.content
+
+    return RAGQueryResponse(answer=answer, citations=citations)
 
 
 @router.delete(
