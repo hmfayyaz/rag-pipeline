@@ -1,94 +1,55 @@
-# Security Policy
+# Security
 
-## Supported Versions
+## Reporting a vulnerability
 
-| Version | Supported |
-|---------|-----------|
-| 0.2.x (latest) | ✅ |
-| < 0.2.0 | ❌ |
+Email: **your@email.com** (or open a private security advisory on the repo). Please include:
 
-Only the latest minor release receives security fixes. We recommend always using the latest version.
+- Affected version / commit
+- Steps to reproduce
+- Impact assessment (data exposure / privilege escalation / DoS / …)
 
-## Reporting a Vulnerability
+We aim to acknowledge within 48h and ship a fix within 7 days for high-severity issues.
 
-**Please do not report security vulnerabilities via public GitHub Issues.**
+---
 
-To report a vulnerability, email the maintainers at:
+## Security model
 
-**security@vstorm.co**
+### Authentication
+- **JWT (`HS256`)** signed with `SECRET_KEY`. Access token TTL = `ACCESS_TOKEN_EXPIRE_MINUTES` (default 30 min). Refresh token TTL = `REFRESH_TOKEN_EXPIRE_MINUTES` (default 7 days).
+- **Password hashing:** bcrypt via `passlib`. Plain passwords never persisted.
+- **Stateless JWT** — no DB session table. Logout is client-side (drop tokens). For server-side revocation, regenerate with `--session-management`.
+- **Admin API key** — static `settings.API_KEY` matched via `X-API-Key` header for service-to-service calls. Constant-time compared with `secrets.compare_digest()`.
 
-Include in your report:
-- Description of the vulnerability
-- Steps to reproduce (CLI invocation or generated project behavior)
-- Affected versions
-- Potential impact
-- Any suggested fix (optional)
+### Authorization
 
-## Response Timeline
+- **Role-based** via `RoleChecker` dep (`UserRole.USER` / `UserRole.ADMIN`).
+- **Workspace scope** — every authenticated request resolves an `ActiveOrg` (default = personal org). Resources scoped by `organization_id` foreign key.
+- **Org roles:** `OWNER` / `ADMIN` / `MEMBER`. Owner can transfer ownership + delete org.
 
-| Stage | Target |
-|-------|--------|
-| Acknowledgement | Within 48 hours |
-| Initial assessment | Within 5 business days |
-| Fix or mitigation | Within 30 days for critical/high |
-| Public disclosure | After fix is released |
+### Transport / network
 
-We follow coordinated disclosure — we ask that you give us time to release a fix before public disclosure.
+- **CORS** — origin list from `settings.CORS_ORIGINS`. Restrict to your domains in production.
+- **HTTPS** — enforce via reverse proxy (Nginx / Traefik / ALB). Strict-Transport-Security header set in middleware when `ENVIRONMENT=production`.
+- **CSP** — frontend sets `frame-ancestors 'none'` by default to prevent click-jacking.
 
-## Scope
+### Data
 
-In scope:
-- Vulnerabilities in the CLI generator itself (`fastapi-fullstack` package)
-- Security issues in the generated project template code (auth, JWT handling, SSRF, etc.)
-- Unsafe defaults in generated project configuration
-- Path traversal or template injection via cookiecutter inputs
+- **Secrets** — read from environment via `pydantic-settings`. Never committed. See `.env.example` + `ENV_VARS.md`.
+- **Audit log** — admin-mutating actions (user updates, deletes, impersonations, role changes) recorded in `app_admin_audit_log` table with actor + IP + payload snapshot.
+- **RAG documents** — file uploads scoped per-org. No public read endpoint; all retrieval happens server-side during chat.
 
-Out of scope:
-- Vulnerabilities in third-party dependencies (report to the respective project)
-- Security issues introduced by users after project generation
-- Issues requiring physical access to the machine
+### Hardening checklist for production
 
-## Security Requirements — What You Can and Cannot Expect
+- [ ] Rotate `SECRET_KEY` and `API_KEY` from generated defaults.
+- [ ] Set `DEBUG=false` and `ENVIRONMENT=production`.
+- [ ] Restrict `CORS_ORIGINS` to your domain(s).
+- [ ] Enforce HTTPS at the proxy layer.
+- [ ] Run `pip-audit` / `bun audit` in CI for dependency vulnerabilities.
+- [ ] Configure database backups + restore test schedule.
 
-### What the generated project provides
+## Known limitations
 
-Generated projects ship with the following security controls enabled by default:
-
-| Control | Implementation | OWASP |
-|---------|---------------|-------|
-| **Authentication** | JWT access + refresh tokens, bcrypt password hashing, API key auth | A07:2021 |
-| **Authorization** | Role-based access control (RBAC) with `RoleChecker` dependency | A01:2021 |
-| **SQL Injection prevention** | SQLAlchemy ORM with parameterized queries (no raw SQL) | A03:2021 |
-| **XSS prevention** | HTML sanitization utilities, Pydantic input validation | A03:2021 |
-| **SSRF protection** | `validate_webhook_url()` blocks private/reserved/loopback IPs, DNS rebinding checks | A10:2021 |
-| **CORS** | Explicit origin allowlists, `*` blocked in production | A05:2021 |
-| **CSRF protection** | HTTP-only cookies for tokens, SameSite cookie attributes | A01:2021 |
-| **Input validation** | All API inputs validated via Pydantic v2 strict schemas | A03:2021 |
-| **Secret management** | `.env`-based configuration, `.gitignore` excludes secrets | A02:2021 |
-| **Dependency scanning** | `pip-audit` in CI scans for known CVEs on every build | A06:2021 |
-| **Path traversal prevention** | `sanitize_filename()` and `validate_safe_path()` utilities | A01:2021 |
-| **Encrypted token storage** | Channel bot tokens encrypted at rest with Fernet (AES-128-CBC) | A02:2021 |
-| **Constant-time comparison** | `secrets.compare_digest()` for API key verification | A02:2021 |
-| **Webhook signature verification** | HMAC-SHA256 for Telegram and Slack webhook endpoints | A08:2021 |
-
-### What is NOT provided (user responsibility)
-
-- **Network security** — Firewalls, VPNs, TLS termination are your responsibility. The template includes Traefik with Let's Encrypt for HTTPS, but you must configure DNS and deployment.
-- **Infrastructure hardening** — OS patching, container image scanning, Kubernetes network policies are out of scope.
-- **Data encryption at rest** — Database-level encryption (TDE) is not configured by default. Enable it at the database layer.
-- **Rate limiting tuning** — Default rate limits are generous for development. Tune for production workloads.
-- **LLM output safety** — The template does not filter or sanitize LLM outputs. Implement content moderation if user-facing.
-- **Secrets rotation** — JWT secret keys and encryption keys are generated once. Implement rotation for production.
-- **Audit logging** — Request-level logging is included, but compliance audit trails (SOC2, HIPAA) require additional implementation.
-- **Penetration testing** — Generated code follows security best practices but has not been formally pen-tested. Test before production deployment.
-
-### CLI generator security
-
-- `pip-audit` in CI — scans for known CVEs on every build
-- `ty` type checking — catches type-related issues at build time
-- Ruff linting — enforces safe coding patterns
-- 100% test coverage — all template combinations tested
-
-## Acknowledgements
-
-We thank all security researchers who responsibly disclose vulnerabilities to us. Confirmed reporters will be credited in the release notes unless they prefer to remain anonymous.
+- **No 2FA / MFA** out of the box. Plan to add TOTP via `pyotp` — see `notes/thingstofix.md` §A.13.
+- **No SAML / OIDC** beyond Google OAuth. Enterprise SSO needs custom IdP integration.
+- **No automatic PII redaction** in logs — be careful what you log.
+- **No server-side session revocation** — JWTs valid until expiry. Compromised tokens require `SECRET_KEY` rotation (invalidates ALL sessions). Enable `--session-management` for selective revocation.
