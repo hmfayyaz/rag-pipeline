@@ -26,7 +26,7 @@ from app.api.deps import (
     VectorStoreSvc,
 )
 from app.core.config import settings
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.schemas.rag import (
     RAGCollectionInfo,
     RAGCollectionList,
@@ -45,6 +45,7 @@ from app.schemas.rag import (
     RAGSyncResponse,
     RAGTrackedDocumentList,
     SupportedFormatsResponse,
+    RAGCardIngestRequest,
 )
 from app.schemas.sync_source import (
     ConnectorList,
@@ -310,8 +311,45 @@ async def ingest_file(
     language: str | None = Query("en", description="Language of the document"),
     confidentiality: str | None = Query("public", description="Confidentiality level"),
     permissions: str | None = Query("read", description="Access permissions constraint"),
+    # Knowledge Card fields
+    card_id: str | None = Query(None, description="Canonical card identity"),
+    card_type: str | None = Query(None, description="Card type"),
+    card_status: str | None = Query("approved", description="Card status"),
+    version: int | None = Query(1, description="Card version"),
+    project: str | None = Query(None, description="Associated project"),
+    tags: list[str] | None = Query(None, description="Free tags"),
+    confidence: str | None = Query(None, description="Confidence level"),
+    source_pointer: str | None = Query(None, description="Pointer to source document"),
+    source_checksum: str | None = Query(None, description="Checksum of original source"),
+    source_created_at: str | None = Query(None, description="Original creation date of the source"),
+    document_id: str | None = Query(None, description="Lineage identifier"),
+    next_review_at: str | None = Query(None, description="Lifecycle reviews"),
+    is_chunk: bool | None = Query(False, description="Is it chunked"),
+    parent_card_id: str | None = Query(None, description="Parent card identifier"),
+    chunk_index: int | None = Query(None, description="Chunk index"),
 ) -> Any:
     """Upload and queue a file for ingestion into a collection."""
+    from uuid import UUID
+    from datetime import datetime
+
+    card_uuid = UUID(card_id) if card_id else None
+    doc_uuid = UUID(document_id) if document_id else None
+    parent_card_uuid = UUID(parent_card_id) if parent_card_id else None
+    
+    source_created_at_dt = None
+    if source_created_at:
+        try:
+            source_created_at_dt = datetime.fromisoformat(source_created_at)
+        except Exception:
+            pass
+            
+    next_review_at_dt = None
+    if next_review_at:
+        try:
+            next_review_at_dt = datetime.fromisoformat(next_review_at)
+        except Exception:
+            pass
+
     data = await file.read()
     return await rag_doc_svc.dispatch_upload(
         collection_name=name,
@@ -325,7 +363,131 @@ async def ingest_file(
         language=language,
         confidentiality=confidentiality,
         permissions=permissions,
+        card_id=card_uuid,
+        tenant_id=active_org.id,
+        card_type=card_type,
+        card_status=card_status,
+        version=version,
+        project=project,
+        tags=tags,
+        confidence=confidence,
+        source_pointer=source_pointer,
+        source_checksum=source_checksum,
+        source_created_at=source_created_at_dt,
+        document_id=doc_uuid,
+        next_review_at=next_review_at_dt,
+        is_chunk=is_chunk,
+        parent_card_id=parent_card_uuid,
+        chunk_index=chunk_index,
     )
+
+
+@router.post(
+    "/collections/{name}/ingest/card",
+    response_model=RAGIngestResponse,
+    response_model_exclude_none=True,
+    status_code=status.HTTP_201_CREATED,
+)
+async def ingest_card(
+    name: str,
+    request: RAGCardIngestRequest,
+    rag_doc_svc: RAGDocumentSvc,
+    vector_store: VectorStoreSvc,
+    admin: CurrentAdmin,
+    active_org: ActiveOrg,
+) -> Any:
+    """Ingest a Knowledge Card directly from JSON content (idempotent)."""
+    from uuid import UUID
+    from datetime import datetime
+    from app.services.rag.ingestion import IngestionService
+    
+    source_created_at_dt = None
+    if request.source_created_at:
+        try:
+            source_created_at_dt = datetime.fromisoformat(request.source_created_at)
+        except Exception:
+            pass
+            
+    next_review_at_dt = None
+    if request.next_review_at:
+        try:
+            next_review_at_dt = datetime.fromisoformat(request.next_review_at)
+        except Exception:
+            pass
+
+    rag_doc = await rag_doc_svc.create_document(
+        collection_name=name,
+        filename=f"card_{request.card_id}.txt",
+        filesize=len(request.content.encode("utf-8")),
+        filetype="txt",
+        storage_path=request.source_pointer or f"card://{request.card_id}",
+        organization_id=active_org.id,
+        owner_id=admin.id,
+        area=request.area,
+        language=request.language,
+        confidentiality=request.confidentiality,
+        permissions="read",
+        # Pass all card details
+        card_id=UUID(request.card_id),
+        tenant_id=active_org.id,
+        card_type=request.type,
+        card_status=request.status,
+        version=request.version,
+        project=request.project,
+        tags=request.tags,
+        confidence=request.confidence,
+        owner=request.owner,
+        source_pointer=request.source_pointer,
+        source_checksum=request.source_checksum,
+        source_created_at=source_created_at_dt,
+        document_id=UUID(request.document_id) if request.document_id else None,
+        next_review_at=next_review_at_dt,
+        is_chunk=False,
+        parent_card_id=None,
+        chunk_index=None,
+    )
+    
+    ingestion_service = IngestionService.from_settings()
+    result = await ingestion_service.ingest_card(
+        collection_name=name,
+        content=request.content,
+        card_id=request.card_id,
+        tenant_id=str(active_org.id),
+        card_type=request.type,
+        card_status=request.status,
+        version=request.version,
+        area=request.area,
+        project=request.project,
+        tags=request.tags,
+        confidence=request.confidence,
+        owner=request.owner,
+        language=request.language,
+        confidentiality=request.confidentiality,
+        permissions="read",
+        source_pointer=request.source_pointer,
+        source_checksum=request.source_checksum,
+        source_created_at=request.source_created_at,
+        document_id=request.document_id,
+        next_review_at=request.next_review_at,
+        is_chunk=False,
+        parent_card_id=None,
+        chunk_index=None,
+    )
+    
+    if result.status.value == "done":
+        await rag_doc_svc.complete_ingestion(
+            str(rag_doc.id), vector_document_id=result.document_id
+        )
+        return RAGIngestResponse(
+            id=str(rag_doc.id),
+            status="done",
+            filename=f"card_{request.card_id}.txt",
+            collection=name,
+            message="Card successfully ingested.",
+        )
+    else:
+        await rag_doc_svc.fail_ingestion(str(rag_doc.id), error_message=result.error_message)
+        raise BadRequestError(message=f"Failed to ingest card: {result.error_message}")
 
 
 @router.get("/documents", response_model=RAGTrackedDocumentList)

@@ -42,6 +42,23 @@ class DocumentMetadata(BaseModel):
     permissions: str | None = None
     additional_info: dict[str, Any] | None = None
 
+    # Knowledge Card fields
+    card_id: str | None = None
+    card_type: str | None = None
+    card_status: str | None = "approved"
+    version: int | None = 1
+    project: str | None = None
+    tags: list[str] | None = None
+    confidence: str | None = None
+    source_pointer: str | None = None
+    source_checksum: str | None = None
+    source_created_at: str | None = None
+    document_id: str | None = None
+    next_review_at: str | None = None
+    is_chunk: bool | None = False
+    parent_card_id: str | None = None
+    chunk_index: int | None = None
+
 
 class Document(BaseModel):
     """A Document object that describes an ingested file."""

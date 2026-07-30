@@ -43,6 +43,10 @@ class BaseVectorStore(ABC):
         pass
 
     @abstractmethod
+    async def delete_card(self, collection_name: str, card_id: str) -> None:
+        pass
+
+    @abstractmethod
     async def get_collection_info(self, collection_name: str) -> CollectionInfo:
         pass
 
@@ -302,6 +306,17 @@ class QdrantVectorStore(BaseVectorStore):
             points_selector=FilterSelector(
                 filter=Filter(
                     must=[FieldCondition(key="parent_doc_id", match=MatchValue(value=sanitized))]
+                )
+            ),
+        )
+
+    async def delete_card(self, collection_name: str, card_id: str) -> None:
+        sanitized = self._sanitize_id(card_id)
+        await self.client.delete(
+            collection_name=collection_name,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must=[FieldCondition(key="metadata.card_id", match=MatchValue(value=sanitized))]
                 )
             ),
         )

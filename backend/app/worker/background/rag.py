@@ -39,6 +39,23 @@ async def ingest_document_in_background(
             confidentiality = rag_doc.confidentiality
             permissions = rag_doc.permissions
 
+            # Extract card-specific fields
+            card_id = str(rag_doc.card_id) if rag_doc.card_id else None
+            card_type = rag_doc.card_type
+            card_status = rag_doc.card_status
+            version = rag_doc.version
+            project = rag_doc.project
+            tags = rag_doc.tags
+            confidence = rag_doc.confidence
+            source_pointer = rag_doc.source_pointer
+            source_checksum = rag_doc.source_checksum
+            source_created_at = rag_doc.source_created_at.isoformat() if rag_doc.source_created_at else None
+            document_id = str(rag_doc.document_id) if rag_doc.document_id else None
+            next_review_at = rag_doc.next_review_at.isoformat() if rag_doc.next_review_at else None
+            is_chunk = rag_doc.is_chunk
+            parent_card_id = str(rag_doc.parent_card_id) if rag_doc.parent_card_id else None
+            chunk_index = rag_doc.chunk_index
+
         result = await IngestionService.from_settings().ingest_file(
             filepath=Path(filepath),
             collection_name=collection_name,
@@ -50,6 +67,21 @@ async def ingest_document_in_background(
             language=language,
             confidentiality=confidentiality,
             permissions=permissions,
+            card_id=card_id,
+            card_type=card_type,
+            card_status=card_status,
+            version=version,
+            project=project,
+            tags=tags,
+            confidence=confidence,
+            source_pointer=source_pointer,
+            source_checksum=source_checksum,
+            source_created_at=source_created_at,
+            document_id=document_id,
+            next_review_at=next_review_at,
+            is_chunk=is_chunk,
+            parent_card_id=parent_card_id,
+            chunk_index=chunk_index,
         )
         async with get_db_context() as db:
             await RAGDocumentService(db).complete_ingestion(

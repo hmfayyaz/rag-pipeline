@@ -68,9 +68,29 @@ async def create(
     language: str | None = "en",
     confidentiality: str | None = "public",
     permissions: str | None = "read",
+    # Knowledge Card fields
+    card_id: UUID | None = None,
+    tenant_id: UUID | None = None,
+    card_type: str | None = None,
+    card_status: str | None = "approved",
+    version: int | None = 1,
+    project: str | None = None,
+    tags: list[str] | None = None,
+    confidence: str | None = None,
+    owner: str | None = None,
+    source_pointer: str | None = None,
+    source_checksum: str | None = None,
+    source_created_at: Any = None,
+    document_id: UUID | None = None,
+    next_review_at: Any = None,
+    is_chunk: bool | None = False,
+    parent_card_id: UUID | None = None,
+    chunk_index: int | None = None,
 ) -> RAGDocument:
     """Create a new RAG document record."""
+    import uuid
     doc = RAGDocument(
+        id=card_id or uuid.uuid4(),
         collection_name=collection_name,
         filename=filename,
         filesize=filesize,
@@ -84,6 +104,23 @@ async def create(
         language=language,
         confidentiality=confidentiality,
         permissions=permissions,
+        card_id=card_id,
+        tenant_id=tenant_id,
+        card_type=card_type,
+        card_status=card_status,
+        version=version,
+        project=project,
+        tags=tags,
+        confidence=confidence,
+        owner=owner,
+        source_pointer=source_pointer,
+        source_checksum=source_checksum,
+        source_created_at=source_created_at,
+        document_id=document_id,
+        next_review_at=next_review_at,
+        is_chunk=is_chunk,
+        parent_card_id=parent_card_id,
+        chunk_index=chunk_index,
     )
     db.add(doc)
     await db.flush()

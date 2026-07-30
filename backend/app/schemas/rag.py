@@ -227,3 +227,25 @@ class RAGQueryResponse(BaseSchema):
 
     answer: str = Field(..., description="The generated answer from LLM")
     citations: list[RAGQueryCitation] = Field(..., description="List of source chunks used for answer")
+
+
+class RAGCardIngestRequest(BaseSchema):
+    """Payload to ingest a Knowledge Card directly from JSON."""
+
+    card_id: str = Field(..., description="Canonical card identity issued by Postgres registry")
+    content: str = Field(..., description="Raw text content of the Knowledge Card")
+    type: str = Field(..., description="Card type")
+    status: str = Field(default="approved", description="draft / proposed / approved / superseded / obsolete / archived")
+    version: int = Field(default=1, description="Version number")
+    area: str | None = Field(None, description="Business area")
+    project: str | None = Field(None, description="Associated project")
+    tags: list[str] | None = Field(None, description="Free tags")
+    confidence: str | None = Field(None, description="Confidence level")
+    confidentiality: str = Field(default="public", description="Confidentiality level")
+    owner: str | None = Field(None, description="Knowledge Owner")
+    language: str = Field(default="en", description="Content language")
+    source_pointer: str | None = Field(None, description="Pointer/URI to raw archive source")
+    source_checksum: str | None = Field(None, description="Checksum of original source")
+    source_created_at: str | None = Field(None, description="Original creation date of the source")
+    document_id: str | None = Field(None, description="Lineage identifier")
+    next_review_at: str | None = Field(None, description="Timestamps")

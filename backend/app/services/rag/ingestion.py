@@ -85,6 +85,22 @@ class IngestionService:
         language: str | None = "en",
         confidentiality: str | None = "public",
         permissions: str | None = "read",
+        # New card fields
+        card_id: str | None = None,
+        card_type: str | None = None,
+        card_status: str | None = "approved",
+        version: int | None = 1,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        confidence: str | None = None,
+        source_pointer: str | None = None,
+        source_checksum: str | None = None,
+        source_created_at: str | None = None,
+        document_id: str | None = None,
+        next_review_at: str | None = None,
+        is_chunk: bool | None = False,
+        parent_card_id: str | None = None,
+        chunk_index: int | None = None,
     ) -> IngestionResult:
         """`source_path` accepts URI schemes like gdrive://id or s3://bucket/key."""
         try:
@@ -101,18 +117,39 @@ class IngestionService:
             document.metadata.language = language
             document.metadata.confidentiality = confidentiality
             document.metadata.permissions = permissions
+            
+            # Map new card fields
+            document.metadata.card_id = card_id
+            document.metadata.card_type = card_type
+            document.metadata.card_status = card_status
+            document.metadata.version = version
+            document.metadata.project = project
+            document.metadata.tags = tags
+            document.metadata.confidence = confidence
+            document.metadata.source_pointer = source_pointer
+            document.metadata.source_checksum = source_checksum
+            document.metadata.source_created_at = source_created_at
+            document.metadata.document_id = document_id
+            document.metadata.next_review_at = next_review_at
+            document.metadata.is_chunk = is_chunk
+            document.metadata.parent_card_id = parent_card_id
+            document.metadata.chunk_index = chunk_index
 
             existing_id = None
             if replace:
-                if document.metadata.source_path:
-                    existing_id = await self._find_existing_by_source(
-                        collection_name, document.metadata.source_path
-                    )
-                # Check by content hash when path lookup missed (exact duplicate detection)
-                if not existing_id and document.metadata.content_hash:
-                    existing_id = await self._find_existing_by_hash(
-                        collection_name, document.metadata.content_hash
-                    )
+                if card_id:
+                    # Idempotency check: purge Qdrant points matching card_id
+                    await self.store.delete_card(collection_name, card_id)
+                else:
+                    if document.metadata.source_path:
+                        existing_id = await self._find_existing_by_source(
+                            collection_name, document.metadata.source_path
+                        )
+                    # Check by content hash when path lookup missed
+                    if not existing_id and document.metadata.content_hash:
+                        existing_id = await self._find_existing_by_hash(
+                            collection_name, document.metadata.content_hash
+                        )
 
             if existing_id:
                 await self.store.delete_document(collection_name, existing_id)
@@ -123,7 +160,7 @@ class IngestionService:
                 document=document,
             )
 
-            action = "replaced" if existing_id else "ingested"
+            action = "replaced" if (existing_id or card_id) else "ingested"
 
             await self._emit(
                 "rag.document.ingested",
@@ -136,19 +173,116 @@ class IngestionService:
                     "source_path": document.metadata.source_path,
                 },
             )
-
             return IngestionResult(
                 status=IngestionStatus.DONE,
                 document_id=document.id,
                 message=f"Successfully {action} '{filepath.name}'",
             )
-
         except Exception as e:
             logger.error("Ingestion error for %s: %s", filepath.name, e)
             return IngestionResult(
                 status=IngestionStatus.ERROR,
                 error_message=str(e),
                 message=f"Failed to process {filepath.name}",
+            )
+
+    async def ingest_card(
+        self,
+        collection_name: str,
+        content: str,
+        card_id: str,
+        tenant_id: str,
+        card_type: str,
+        card_status: str = "approved",
+        version: int = 1,
+        area: str | None = None,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        confidence: str | None = None,
+        owner: str | None = None,
+        language: str | None = "en",
+        confidentiality: str | None = "public",
+        permissions: str | None = "read",
+        source_pointer: str | None = None,
+        source_checksum: str | None = None,
+        source_created_at: str | None = None,
+        document_id: str | None = None,
+        next_review_at: str | None = None,
+        is_chunk: bool = False,
+        parent_card_id: str | None = None,
+        chunk_index: int | None = None,
+    ) -> IngestionResult:
+        """Ingest a Knowledge Card directly from raw text content."""
+        try:
+            from app.services.rag.models import DocumentPage, DocumentPageChunk, DocumentMetadata
+            import hashlib
+
+            content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+            metadata = DocumentMetadata(
+                filename=f"card_{card_id}.txt",
+                filesize=len(content.encode("utf-8")),
+                filetype="txt",
+                source_path=source_pointer or f"card://{card_id}",
+                content_hash=content_hash,
+                tenant_id=tenant_id,
+                area=area,
+                owner=owner,
+                language=language,
+                confidentiality=confidentiality,
+                permissions=permissions,
+                card_id=card_id,
+                card_type=card_type,
+                card_status=card_status,
+                version=version,
+                project=project,
+                tags=tags,
+                confidence=confidence,
+                source_pointer=source_pointer,
+                source_checksum=source_checksum,
+                source_created_at=source_created_at,
+                document_id=document_id,
+                next_review_at=next_review_at,
+                is_chunk=is_chunk,
+                parent_card_id=parent_card_id,
+                chunk_index=chunk_index,
+            )
+
+            page = DocumentPage(page_num=1, content=content)
+            chunk = DocumentPageChunk(
+                page_num=1,
+                content=content,
+                chunk_content=content,
+                chunk_num=0,
+                parent_doc_id=card_id,
+            )
+
+            document = Document(
+                id=card_id,
+                pages=[page],
+                chunked_pages=[chunk],
+                metadata=metadata
+            )
+
+            # Idempotency: delete any existing points in Qdrant matching this card_id!
+            await self.store.delete_card(collection_name, card_id)
+
+            await self.store.insert_document(
+                collection_name=collection_name,
+                document=document,
+            )
+
+            return IngestionResult(
+                status=IngestionStatus.DONE,
+                document_id=card_id,
+                message=f"Successfully ingested Knowledge Card '{card_id}'",
+            )
+        except Exception as e:
+            logger.error("Card ingestion error for %s: %s", card_id, e)
+            return IngestionResult(
+                status=IngestionStatus.ERROR,
+                error_message=str(e),
+                message=f"Failed to process card {card_id}",
             )
 
     async def find_existing(self, collection_name: str, source_path: str) -> str | None:

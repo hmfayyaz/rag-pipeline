@@ -168,3 +168,53 @@ async def test_qdrant_store_inserts_payload_with_metadata(mock_embeddings, mock_
         assert meta["language"] == "ur"
         assert meta["confidentiality"] == "medium"
         assert meta["permissions"] == "read"
+
+
+@pytest.mark.anyio
+async def test_ingest_card_directly_assigns_fields(mock_embeddings, mock_rag_settings):
+    """Verify IngestionService.ingest_card inserts Knowledge Cards directly into Qdrant."""
+    with patch("app.services.rag.vectorstore.AsyncQdrantClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.get_collections = AsyncMock(return_value=MagicMock(collections=[]))
+        mock_client_cls.return_value = mock_client
+        
+        store = QdrantVectorStore(mock_rag_settings, mock_embeddings)
+        svc = IngestionService(MagicMock(), store)
+        
+        card_id = str(uuid.uuid4())
+        tenant_id = str(uuid.uuid4())
+        
+        result = await svc.ingest_card(
+            collection_name="test_collection",
+            content="This is the raw content of the card.",
+            card_id=card_id,
+            tenant_id=tenant_id,
+            card_type="Decision",
+            card_status="approved",
+            version=1,
+            project="F2",
+            tags=["demo", "test"],
+            confidence="high",
+            confidentiality="low",
+        )
+        
+        assert result.status.value == "done"
+        assert result.document_id == card_id
+        
+        # Verify idempotency and insertion
+        mock_client.delete.assert_called_once()  # deletes existing points matching card_id
+        mock_client.upsert.assert_called_once()
+        
+        points = mock_client.upsert.call_args[1]["points"]
+        assert len(points) == 1
+        assert points[0].payload["content"] == "This is the raw content of the card."
+        
+        meta = points[0].payload["metadata"]
+        assert meta["card_id"] == card_id
+        assert meta["tenant_id"] == tenant_id
+        assert meta["card_type"] == "Decision"
+        assert meta["card_status"] == "approved"
+        assert meta["project"] == "F2"
+        assert meta["tags"] == ["demo", "test"]
+        assert meta["confidence"] == "high"
+        assert meta["confidentiality"] == "low"

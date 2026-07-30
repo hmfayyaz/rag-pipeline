@@ -111,8 +111,35 @@ class RAGDocumentService:
         language: str | None = "en",
         confidentiality: str | None = "public",
         permissions: str | None = "read",
+        # Knowledge Card fields
+        card_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        card_type: str | None = None,
+        card_status: str | None = "approved",
+        version: int | None = 1,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        confidence: str | None = None,
+        owner: str | None = None,
+        source_pointer: str | None = None,
+        source_checksum: str | None = None,
+        source_created_at: Any = None,
+        document_id: UUID | None = None,
+        next_review_at: Any = None,
+        is_chunk: bool | None = False,
+        parent_card_id: UUID | None = None,
+        chunk_index: int | None = None,
     ) -> RAGDocument:
         """Create a new RAG document tracking record."""
+        if card_id:
+            from sqlalchemy import select
+            stmt = select(RAGDocument).where(RAGDocument.card_id == card_id)
+            res = await self.db.execute(stmt)
+            existing = res.scalars().all()
+            for old_doc in existing:
+                await self.db.delete(old_doc)
+            await self.db.flush()
+
         return await rag_document_repo.create(
             self.db,
             collection_name=collection_name,
@@ -127,6 +154,23 @@ class RAGDocumentService:
             language=language,
             confidentiality=confidentiality,
             permissions=permissions,
+            card_id=card_id,
+            tenant_id=tenant_id,
+            card_type=card_type,
+            card_status=card_status,
+            version=version,
+            project=project,
+            tags=tags,
+            confidence=confidence,
+            owner=owner,
+            source_pointer=source_pointer,
+            source_checksum=source_checksum,
+            source_created_at=source_created_at,
+            document_id=document_id,
+            next_review_at=next_review_at,
+            is_chunk=is_chunk,
+            parent_card_id=parent_card_id,
+            chunk_index=chunk_index,
         )
 
     async def dispatch_upload(
@@ -144,6 +188,24 @@ class RAGDocumentService:
         language: str | None = "en",
         confidentiality: str | None = "public",
         permissions: str | None = "read",
+        # New Knowledge Card fields
+        card_id: UUID | None = None,
+        tenant_id: UUID | None = None,
+        card_type: str | None = None,
+        card_status: str | None = "approved",
+        version: int | None = 1,
+        project: str | None = None,
+        tags: list[str] | None = None,
+        confidence: str | None = None,
+        owner: str | None = None,
+        source_pointer: str | None = None,
+        source_checksum: str | None = None,
+        source_created_at: Any = None,
+        document_id: UUID | None = None,
+        next_review_at: Any = None,
+        is_chunk: bool | None = False,
+        parent_card_id: UUID | None = None,
+        chunk_index: int | None = None,
     ) -> RAGIngestResponse:
         """Validate, persist, and queue an uploaded file for ingestion.
 
@@ -185,6 +247,23 @@ class RAGDocumentService:
             language=language,
             confidentiality=confidentiality,
             permissions=permissions,
+            card_id=card_id,
+            tenant_id=tenant_id,
+            card_type=card_type,
+            card_status=card_status,
+            version=version,
+            project=project,
+            tags=tags,
+            confidence=confidence,
+            owner=owner,
+            source_pointer=source_pointer,
+            source_checksum=source_checksum,
+            source_created_at=source_created_at,
+            document_id=document_id,
+            next_review_at=next_review_at,
+            is_chunk=is_chunk,
+            parent_card_id=parent_card_id,
+            chunk_index=chunk_index,
         )
         doc_id = rag_doc.id
 
