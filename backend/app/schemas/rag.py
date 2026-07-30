@@ -92,6 +92,25 @@ class RAGTrackedDocumentItem(BaseSchema):
     created_at: str | None = None
     completed_at: str | None = None
 
+    # Knowledge Card fields
+    card_id: str | None = None
+    tenant_id: str | None = None
+    card_type: str | None = None
+    card_status: str | None = None
+    version: int | None = None
+    project: str | None = None
+    tags: list[str] | None = None
+    confidence: str | None = None
+    owner: str | None = None
+    source_pointer: str | None = None
+    source_checksum: str | None = None
+    source_created_at: str | None = None
+    document_id: str | None = None
+    next_review_at: str | None = None
+    is_chunk: bool | None = None
+    parent_card_id: str | None = None
+    chunk_index: int | None = None
+
 
 class RAGTrackedDocumentList(BaseSchema):
     """List of tracked RAG documents."""
@@ -192,6 +211,15 @@ class RAGQueryCitation(BaseSchema):
     filename: str = Field(..., description="Source document filename")
     page_num: int | None = Field(None, description="Page number of source document")
     parent_doc_id: str = Field(..., description="Parent document identifier")
+
+    # Knowledge Card fields
+    card_id: str | None = Field(None, description="Canonical card identity")
+    tenant_id: str | None = Field(None, description="Tenant identifier")
+    card_type: str | None = Field(None, description="Card type")
+    card_status: str | None = Field(None, description="Card status")
+    version: int | None = Field(None, description="Card version")
+    project: str | None = Field(None, description="Associated project")
+    source_pointer: str | None = Field(None, description="Pointer to source document")
 
 
 class RAGQueryResponse(BaseSchema):

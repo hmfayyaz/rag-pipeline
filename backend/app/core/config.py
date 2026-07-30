@@ -133,6 +133,8 @@ class Settings(BaseSettings):
     QDRANT_PORT: int = 6333
     QDRANT_API_KEY: str = ""
     EMBEDDING_MODEL: str = "text-embedding-3-large"
+    BGEM3_ENDPOINT_URL: str = ""
+    BGEM3_API_KEY: str = ""
 
     RAG_CHUNK_SIZE: int = 512
     RAG_CHUNK_OVERLAP: int = 50

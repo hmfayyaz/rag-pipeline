@@ -16,6 +16,7 @@ def mock_embeddings():
     # Simulate embedding vectors matching expected dimensions
     embedder.embed_document = MagicMock(return_value=[[0.1] * 768])
     embedder.embed_query = MagicMock(return_value=[0.1] * 768)
+    embedder.embed_text = AsyncMock(return_value=([0.1] * 768, {"indices": [1, 2], "values": [0.5, 0.5]}))
     return embedder
 
 

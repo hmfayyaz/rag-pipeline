@@ -144,6 +144,11 @@ from qdrant_client.models import (
     MatchValue,
     PointStruct,
     VectorParams,
+    SparseVectorParams,
+    SparseVector,
+    Prefetch,
+    FusionQuery,
+    Fusion,
 )
 
 from app.core.config import settings as app_settings
@@ -169,10 +174,15 @@ class QdrantVectorStore(BaseVectorStore):
         if name not in [c.name for c in collections.collections]:
             await self.client.create_collection(
                 collection_name=name,
-                vectors_config=VectorParams(
-                    size=self.settings.embeddings_config.dim,
-                    distance=Distance.COSINE,
-                ),
+                vectors_config={
+                    "dense": VectorParams(
+                        size=self.settings.embeddings_config.dim,
+                        distance=Distance.COSINE,
+                    )
+                },
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams()
+                },
             )
             # Create payload indexes for metadata filtering
             await self.client.create_payload_index(
@@ -200,19 +210,28 @@ class QdrantVectorStore(BaseVectorStore):
         await self._ensure_collection(collection_name)
         if not document.chunked_pages:
             raise ValueError("Document has no chunked pages.")
-        vectors = self.embedder.embed_document(document)
-        points = [
-            PointStruct(
-                id=chunk.chunk_id,
-                vector=vectors[i],
-                payload={
-                    "content": chunk.chunk_content,
-                    "parent_doc_id": chunk.parent_doc_id,
-                    "metadata": self._build_chunk_metadata(chunk, document),
-                },
+        
+        points = []
+        for chunk in document.chunked_pages:
+            content = chunk.chunk_content or ""
+            dense, sparse = await self.embedder.embed_text(content)
+            points.append(
+                PointStruct(
+                    id=chunk.chunk_id,
+                    vector={
+                        "dense": dense,
+                        "sparse": SparseVector(
+                            indices=sparse["indices"],
+                            values=sparse["values"]
+                        )
+                    },
+                    payload={
+                        "content": content,
+                        "parent_doc_id": chunk.parent_doc_id,
+                        "metadata": self._build_chunk_metadata(chunk, document),
+                    },
+                )
             )
-            for i, chunk in enumerate(document.chunked_pages)
-        ]
         await self.client.upsert(collection_name=collection_name, points=points)
 
     async def search(
@@ -223,7 +242,7 @@ class QdrantVectorStore(BaseVectorStore):
         filter_expr: str = "",
         query_filter: Any = None,
     ) -> list[SearchResult]:
-        query_vector = self.embedder.embed_query(query)
+        dense_vector, sparse_dict = await self.embedder.embed_text(query)
         qdrant_filter = query_filter
         if not qdrant_filter and filter_expr and "parent_doc_id" in filter_expr:
             m = re.search(r'parent_doc_id\s*==\s*"([^"]+)"', filter_expr)
@@ -231,9 +250,27 @@ class QdrantVectorStore(BaseVectorStore):
                 qdrant_filter = Filter(
                     must=[FieldCondition(key="parent_doc_id", match=MatchValue(value=m.group(1)))]
                 )
+        
+        prefetches = [
+            Prefetch(
+                query=dense_vector,
+                using="dense",
+                limit=limit * 3,
+            ),
+            Prefetch(
+                query=SparseVector(
+                    indices=sparse_dict["indices"],
+                    values=sparse_dict["values"]
+                ),
+                using="sparse",
+                limit=limit * 3,
+            )
+        ]
+
         results = await self.client.query_points(
             collection_name=collection_name,
-            query=query_vector,
+            prefetch=prefetches,
+            query=FusionQuery(fusion=Fusion.RRF),
             limit=limit,
             query_filter=qdrant_filter,
         )
