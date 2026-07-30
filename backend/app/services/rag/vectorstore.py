@@ -96,6 +96,11 @@ class BaseVectorStore(ABC):
             "chunk_num": chunk.chunk_num,
             **document.metadata.model_dump(),
         }
+        # Align keys with blueprint Qdrant payload requirements
+        if "card_status" in meta:
+            meta["status"] = meta.pop("card_status")
+        if "card_type" in meta:
+            meta["type"] = meta.pop("card_type")
         return meta
 
     def _sanitize_id(self, document_id: str) -> str:

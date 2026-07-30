@@ -20,6 +20,16 @@ class RAGSearchRequest(BaseSchema):
     filter: str | None = Field(
         None, description="Scalar filter expression (e.g. 'filetype == \"pdf\"')"
     )
+    
+    # Custom query filters
+    status: list[str] | None = Field(None, description="Filter by card status list")
+    type: str | None = Field(None, description="Filter by card type")
+    area: str | None = Field(None, description="Filter by business area")
+    project: str | None = Field(None, description="Filter by project")
+    tags: list[str] | None = Field(None, description="Filter by tags")
+    confidence: str | None = Field(None, description="Filter by confidence")
+    owner: str | None = Field(None, description="Filter by owner")
+    language: str | None = Field(None, description="Filter by language")
 
 
 class RAGSearchResult(BaseSchema):
@@ -201,6 +211,16 @@ class RAGQueryRequest(BaseSchema):
     limit: int = Field(default=4, ge=1, le=20, description="Max context chunks to retrieve")
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
     use_reranker: bool = Field(default=False, description="Whether to use reranking")
+    
+    # Custom query filters
+    status: list[str] | None = Field(None, description="Filter by card status list")
+    type: str | None = Field(None, description="Filter by card type")
+    area: str | None = Field(None, description="Filter by business area")
+    project: str | None = Field(None, description="Filter by project")
+    tags: list[str] | None = Field(None, description="Filter by tags")
+    confidence: str | None = Field(None, description="Filter by confidence")
+    owner: str | None = Field(None, description="Filter by owner")
+    language: str | None = Field(None, description="Filter by language")
 
 
 class RAGQueryCitation(BaseSchema):

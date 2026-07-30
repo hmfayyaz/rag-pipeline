@@ -34,6 +34,8 @@ class BaseRetrievalService(ABC):
         tenant_id: str | None = None,
         role: str | None = None,
         current_user_id: str | None = None,
+        status_filter: list[str] | None = None,
+        custom_filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         pass
 
@@ -47,6 +49,8 @@ class BaseRetrievalService(ABC):
         tenant_id: str | None = None,
         role: str | None = None,
         current_user_id: str | None = None,
+        status_filter: list[str] | None = None,
+        custom_filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         pass
 
@@ -137,6 +141,8 @@ class RetrievalService(BaseRetrievalService):
         tenant_id: str | None,
         role: str | None,
         current_user_id: str | None,
+        status_filter: list[str] | None = None,
+        custom_filters: dict[str, Any] | None = None,
     ) -> Any:
         import re
         from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny
@@ -151,6 +157,22 @@ class RetrievalService(BaseRetrievalService):
         must_conditions = [
             FieldCondition(key="metadata.tenant_id", match=MatchValue(value=str(tenant_id)))
         ]
+
+        # Enforce status filter: normal query returns approved cards only, by default.
+        allowed_statuses = ["approved"]
+        if status_filter:
+            # Only Admins/Owners have permission to override the status filter
+            if role in ["admin", "owner"]:
+                allowed_statuses = status_filter
+            else:
+                logger.warning(
+                    f"[RETRIEVAL] Role '{role}' has no permission to override status filter to {status_filter}. "
+                    "Restricting query to 'approved' status only."
+                )
+
+        must_conditions.append(
+            FieldCondition(key="metadata.status", match=MatchAny(any=allowed_statuses))
+        )
 
         # RBAC permissions filtering
         if role == "viewer":
@@ -189,6 +211,23 @@ class RetrievalService(BaseRetrievalService):
                 )
             )
 
+        # Apply any additional custom filters from caller (§5.2)
+        if custom_filters:
+            for k, val in custom_filters.items():
+                if val is not None:
+                    if k == "tags" and isinstance(val, list):
+                        must_conditions.append(
+                            FieldCondition(key="metadata.tags", match=MatchAny(any=val))
+                        )
+                    elif isinstance(val, list):
+                        must_conditions.append(
+                            FieldCondition(key=f"metadata.{k}", match=MatchAny(any=val))
+                        )
+                    else:
+                        must_conditions.append(
+                            FieldCondition(key=f"metadata.{k}", match=MatchValue(value=val))
+                        )
+
         return Filter(must=must_conditions)
 
     async def retrieve(
@@ -202,6 +241,8 @@ class RetrievalService(BaseRetrievalService):
         tenant_id: str | None = None,
         role: str | None = None,
         current_user_id: str | None = None,
+        status_filter: list[str] | None = None,
+        custom_filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         import re
         should_rerank = use_reranker and self._reranker_enabled
@@ -210,7 +251,7 @@ class RetrievalService(BaseRetrievalService):
         fetch_multiplier = 3 if should_rerank else 2
 
         logger.info(
-            "[RETRIEVAL] Query: '%.50s...', collection: %s, limit: %d, filter: '%s', rerank: %s, tenant: %s, role: %s",
+            "[RETRIEVAL] Query: '%.50s...', collection: %s, limit: %d, filter: '%s', rerank: %s, tenant: %s, role: %s, status_filter: %s, custom_filters: %s",
             query,
             collection_name,
             limit,
@@ -218,12 +259,16 @@ class RetrievalService(BaseRetrievalService):
             should_rerank,
             tenant_id,
             role,
+            status_filter,
+            custom_filters,
         )
 
         start_time = time.time()
 
         # Build security and access control filters
-        qdrant_filter = self._build_security_filter(tenant_id, role, current_user_id)
+        qdrant_filter = self._build_security_filter(
+            tenant_id, role, current_user_id, status_filter, custom_filters
+        )
         if filter and "parent_doc_id" in filter:
             m = re.search(r'parent_doc_id\s*==\s*"([^"]+)"', filter)
             if m:
@@ -324,6 +369,8 @@ class RetrievalService(BaseRetrievalService):
         tenant_id: str | None = None,
         role: str | None = None,
         current_user_id: str | None = None,
+        status_filter: list[str] | None = None,
+        custom_filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         all_results: list[SearchResult] = []
         for name in collection_names:
@@ -337,6 +384,8 @@ class RetrievalService(BaseRetrievalService):
                     tenant_id=tenant_id,
                     role=role,
                     current_user_id=current_user_id,
+                    status_filter=status_filter,
+                    custom_filters=custom_filters,
                 )
                 # Tag results with collection name in metadata
                 for r in results:
@@ -367,19 +416,23 @@ class RetrievalService(BaseRetrievalService):
         tenant_id: str | None = None,
         role: str | None = None,
         current_user_id: str | None = None,
+        status_filter: list[str] | None = None,
+        custom_filters: dict[str, Any] | None = None,
     ) -> list[SearchResult]:
         """Retrieve chunks restricted to a single document."""
         # Sanitize document_id to prevent filter injection
         sanitized_id = document_id.replace('"', "").replace("\\", "")
         filter_expr = f'parent_doc_id == "{sanitized_id}"'
         logger.info(
-            "[RETRIEVAL] Retrieve by document: doc_id=%s, query='%.30s...', limit=%d, rerank=%s, tenant=%s, role=%s",
+            "[RETRIEVAL] Retrieve by document: doc_id=%s, query='%.30s...', limit=%d, rerank=%s, tenant=%s, role=%s, status_filter=%s, custom_filters=%s",
             document_id,
             query,
             limit,
             use_reranker,
             tenant_id,
             role,
+            status_filter,
+            custom_filters,
         )
         return await self.retrieve(
             query=query,
@@ -390,4 +443,6 @@ class RetrievalService(BaseRetrievalService):
             tenant_id=tenant_id,
             role=role,
             current_user_id=current_user_id,
+            status_filter=status_filter,
+            custom_filters=custom_filters,
         )

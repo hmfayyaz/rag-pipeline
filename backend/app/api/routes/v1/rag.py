@@ -166,6 +166,16 @@ async def search_documents(
     membership = await member_repo.get(db, organization_id=active_org.id, user_id=current_user.id)
     role = membership.role if membership else "viewer"
 
+    custom_filters = {
+        "type": request.type,
+        "area": request.area,
+        "project": request.project,
+        "tags": request.tags,
+        "confidence": request.confidence,
+        "owner": request.owner,
+        "language": request.language,
+    }
+
     if request.collection_names and len(request.collection_names) > 1:
         results = await retrieval_service.retrieve_multi(
             query=request.query,
@@ -176,6 +186,8 @@ async def search_documents(
             tenant_id=str(active_org.id),
             role=role,
             current_user_id=str(current_user.id),
+            status_filter=request.status,
+            custom_filters=custom_filters,
         )
     else:
         collection = (
@@ -191,6 +203,8 @@ async def search_documents(
             tenant_id=str(active_org.id),
             role=role,
             current_user_id=str(current_user.id),
+            status_filter=request.status,
+            custom_filters=custom_filters,
         )
     api_results = [RAGSearchResult(**hit.model_dump()) for hit in results]
     return RAGSearchResponse(results=api_results)
@@ -213,6 +227,16 @@ async def query_knowledge_base(
     membership = await member_repo.get(db, organization_id=active_org.id, user_id=current_user.id)
     role = membership.role if membership else "viewer"
 
+    query_custom_filters = {
+        "type": request.type,
+        "area": request.area,
+        "project": request.project,
+        "tags": request.tags,
+        "confidence": request.confidence,
+        "owner": request.owner,
+        "language": request.language,
+    }
+
     # 1. Retrieve security-filtered document chunks
     results = await retrieval_service.retrieve(
         query=request.query,
@@ -223,6 +247,8 @@ async def query_knowledge_base(
         tenant_id=str(active_org.id),
         role=role,
         current_user_id=str(current_user.id),
+        status_filter=request.status,
+        custom_filters=query_custom_filters,
     )
 
     # 2. Build citations list

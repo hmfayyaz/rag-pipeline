@@ -212,8 +212,8 @@ async def test_ingest_card_directly_assigns_fields(mock_embeddings, mock_rag_set
         meta = points[0].payload["metadata"]
         assert meta["card_id"] == card_id
         assert meta["tenant_id"] == tenant_id
-        assert meta["card_type"] == "Decision"
-        assert meta["card_status"] == "approved"
+        assert meta["type"] == "Decision"
+        assert meta["status"] == "approved"
         assert meta["project"] == "F2"
         assert meta["tags"] == ["demo", "test"]
         assert meta["confidence"] == "high"
