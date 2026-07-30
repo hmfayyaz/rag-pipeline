@@ -20,11 +20,11 @@ from app.api.routes.v1 import knowledge_bases
 from app.api.routes.v1 import me_slash_commands
 from app.api.routes.v1 import admin_stats
 from app.api.routes.v1 import org_integrations
+from app.api.routes.v1 import dev
 
 v1_router = APIRouter()
 
 v1_router.include_router(health.router, tags=["health"])
-
 v1_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 v1_router.include_router(users.router, prefix="/users", tags=["users"])
 
@@ -58,3 +58,4 @@ v1_router.include_router(admin_stats.router, prefix="/admin", tags=["admin:stats
 v1_router.include_router(
     org_integrations.router, prefix="/org/integrations", tags=["org:integrations"]
 )
+v1_router.include_router(dev.router, prefix="/dev", tags=["dev"])
