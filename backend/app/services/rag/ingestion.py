@@ -212,65 +212,143 @@ class IngestionService:
         parent_card_id: str | None = None,
         chunk_index: int | None = None,
     ) -> IngestionResult:
-        """Ingest a Knowledge Card directly from raw text content."""
+        """Ingest a Knowledge Card directly from raw text content.
+        
+        If the card is oversized (>8000 characters), it will be split into sibling points
+        referencing the parent card.
+        """
         try:
             from app.services.rag.models import DocumentPage, DocumentPageChunk, DocumentMetadata
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
             import hashlib
+            import uuid
 
             content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-
-            metadata = DocumentMetadata(
-                filename=f"card_{card_id}.txt",
-                filesize=len(content.encode("utf-8")),
-                filetype="txt",
-                source_path=source_pointer or f"card://{card_id}",
-                content_hash=content_hash,
-                tenant_id=tenant_id,
-                area=area,
-                owner=owner,
-                language=language,
-                confidentiality=confidentiality,
-                permissions=permissions,
-                card_id=card_id,
-                card_type=card_type,
-                card_status=card_status,
-                version=version,
-                project=project,
-                tags=tags,
-                confidence=confidence,
-                source_pointer=source_pointer,
-                source_checksum=source_checksum,
-                source_created_at=source_created_at,
-                document_id=document_id,
-                next_review_at=next_review_at,
-                is_chunk=is_chunk,
-                parent_card_id=parent_card_id,
-                chunk_index=chunk_index,
-            )
-
-            page = DocumentPage(page_num=1, content=content)
-            chunk = DocumentPageChunk(
-                page_num=1,
-                content=content,
-                chunk_content=content,
-                chunk_num=0,
-                parent_doc_id=card_id,
-            )
-
-            document = Document(
-                id=card_id,
-                pages=[page],
-                chunked_pages=[chunk],
-                metadata=metadata
-            )
 
             # Idempotency: delete any existing points in Qdrant matching this card_id!
             await self.store.delete_card(collection_name, card_id)
 
-            await self.store.insert_document(
-                collection_name=collection_name,
-                document=document,
-            )
+            MAX_CARD_LENGTH = 8000
+            if len(content) <= MAX_CARD_LENGTH:
+                metadata = DocumentMetadata(
+                    filename=f"card_{card_id}.txt",
+                    filesize=len(content.encode("utf-8")),
+                    filetype="txt",
+                    source_path=source_pointer or f"card://{card_id}",
+                    content_hash=content_hash,
+                    tenant_id=tenant_id,
+                    area=area,
+                    owner=owner,
+                    language=language,
+                    confidentiality=confidentiality,
+                    permissions=permissions,
+                    card_id=card_id,
+                    card_type=card_type,
+                    card_status=card_status,
+                    version=version,
+                    project=project,
+                    tags=tags,
+                    confidence=confidence,
+                    source_pointer=source_pointer,
+                    source_checksum=source_checksum,
+                    source_created_at=source_created_at,
+                    document_id=document_id,
+                    next_review_at=next_review_at,
+                    is_chunk=False,
+                    parent_card_id=None,
+                    chunk_index=None,
+                )
+
+                page = DocumentPage(page_num=1, content=content)
+                chunk = DocumentPageChunk(
+                    chunk_id=card_id,
+                    page_num=1,
+                    content=content,
+                    chunk_content=content,
+                    chunk_num=0,
+                    parent_doc_id=card_id,
+                )
+
+                document = Document(
+                    id=card_id,
+                    pages=[page],
+                    chunked_pages=[chunk],
+                    metadata=metadata
+                )
+
+                await self.store.insert_document(
+                    collection_name=collection_name,
+                    document=document,
+                )
+            else:
+                splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=6000,
+                    chunk_overlap=1000,
+                    length_function=len,
+                )
+                chunks = splitter.split_text(content)
+                logger.info(
+                    "Card %s content length (%d) exceeds limit (%d). Split into %d chunks.",
+                    card_id,
+                    len(content),
+                    MAX_CARD_LENGTH,
+                    len(chunks),
+                )
+
+                for idx, chunk_text in enumerate(chunks):
+                    # Deterministic point UUID based on card_id and chunk index
+                    chunk_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{card_id}_chunk_{idx}"))
+
+                    metadata = DocumentMetadata(
+                        filename=f"card_{card_id}_chunk_{idx}.txt",
+                        filesize=len(chunk_text.encode("utf-8")),
+                        filetype="txt",
+                        source_path=source_pointer or f"card://{card_id}",
+                        content_hash=content_hash,
+                        tenant_id=tenant_id,
+                        area=area,
+                        owner=owner,
+                        language=language,
+                        confidentiality=confidentiality,
+                        permissions=permissions,
+                        card_id=card_id,
+                        card_type=card_type,
+                        card_status=card_status,
+                        version=version,
+                        project=project,
+                        tags=tags,
+                        confidence=confidence,
+                        source_pointer=source_pointer,
+                        source_checksum=source_checksum,
+                        source_created_at=source_created_at,
+                        document_id=document_id,
+                        next_review_at=next_review_at,
+                        is_chunk=True,
+                        parent_card_id=card_id,
+                        chunk_index=idx,
+                    )
+
+                    page = DocumentPage(page_num=1, content=chunk_text)
+                    chunk = DocumentPageChunk(
+                        chunk_id=chunk_uuid,
+                        page_num=1,
+                        content=chunk_text,
+                        chunk_content=chunk_text,
+                        chunk_num=0,
+                        parent_doc_id=chunk_uuid,
+                    )
+
+                    document = Document(
+                        id=chunk_uuid,
+                        pages=[page],
+                        chunked_pages=[chunk],
+                        metadata=metadata
+                    )
+
+                    await self.store.insert_document(
+                        collection_name=collection_name,
+                        document=document,
+                    )
 
             return IngestionResult(
                 status=IngestionStatus.DONE,

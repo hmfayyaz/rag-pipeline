@@ -233,3 +233,50 @@ async def test_retrieve_passes_qdrant_filter(mock_vector_store, mock_rag_setting
     # Check that tenant condition is in the must list
     assert qdrant_filter.must[0].key == "metadata.tenant_id"
     assert qdrant_filter.must[0].match.value == tenant_id
+
+
+@pytest.mark.anyio
+async def test_retrieve_collapses_sibling_chunks(mock_vector_store, mock_rag_settings):
+    """Verify that retrieve collapses/groups sibling chunks of the same parent card."""
+    svc = RetrievalService(mock_vector_store, mock_rag_settings)
+    
+    parent_id = str(uuid.uuid4())
+    from app.services.rag.models import SearchResult
+    
+    # Mock search returning two chunks of the same parent card, and one chunk of another card
+    mock_results = [
+        SearchResult(
+            content="Chunk 0 content",
+            score=0.9,
+            metadata={"parent_card_id": parent_id, "chunk_index": 0, "tenant_id": "org-id", "status": "approved"},
+            parent_doc_id=parent_id
+        ),
+        SearchResult(
+            content="Chunk 1 content",
+            score=0.8,
+            metadata={"parent_card_id": parent_id, "chunk_index": 1, "tenant_id": "org-id", "status": "approved"},
+            parent_doc_id=parent_id
+        ),
+        SearchResult(
+            content="Other card content",
+            score=0.75,
+            metadata={"card_id": "other-card-id", "tenant_id": "org-id", "status": "approved"},
+            parent_doc_id="other-card-id"
+        )
+    ]
+    
+    mock_vector_store.search = AsyncMock(return_value=mock_results)
+    
+    results = await svc.retrieve(
+        query="test query",
+        collection_name="test_collection",
+        tenant_id=str(uuid.uuid4()),
+        role="owner",
+        current_user_id=str(uuid.uuid4())
+    )
+    
+    # Should only return Chunk 0 (highest score for parent_id) and the other card.
+    # Chunk 1 of parent_id should be collapsed!
+    assert len(results) == 2
+    assert results[0].content == "Chunk 0 content"
+    assert results[1].content == "Other card content"

@@ -326,9 +326,22 @@ class RetrievalService(BaseRetrievalService):
         filtered_results = [res for res in pipeline_results if res.score >= min_score]
 
         seen_keys: set[str] = set()
+        seen_parent_cards: set[str] = set()
         deduped_results: list[SearchResult] = []
         for r in filtered_results:
             key = _result_key(r)
+            
+            # Collapse sibling chunks: only return the highest scoring chunk from any parent card
+            parent_card = r.metadata.get("parent_card_id") or r.metadata.get("card_id")
+            if parent_card:
+                if parent_card in seen_parent_cards:
+                    logger.info(
+                        "[RETRIEVAL] Collapsed sibling chunk hit for parent card %s to prioritize diversity.",
+                        parent_card,
+                    )
+                    continue
+                seen_parent_cards.add(parent_card)
+
             if key not in seen_keys:
                 seen_keys.add(key)
                 deduped_results.append(r)

@@ -218,3 +218,65 @@ async def test_ingest_card_directly_assigns_fields(mock_embeddings, mock_rag_set
         assert meta["tags"] == ["demo", "test"]
         assert meta["confidence"] == "high"
         assert meta["confidentiality"] == "low"
+
+
+@pytest.mark.anyio
+async def test_ingest_oversized_card_chunks_deterministically(mock_embeddings, mock_rag_settings):
+    """Verify that a very large Knowledge Card gets split into multiple sibling points with uuid.uuid5 ids."""
+    with patch("app.services.rag.vectorstore.AsyncQdrantClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.get_collections = AsyncMock(return_value=MagicMock(collections=[]))
+        mock_client_cls.return_value = mock_client
+        
+        store = QdrantVectorStore(mock_rag_settings, mock_embeddings)
+        svc = IngestionService(MagicMock(), store)
+        
+        card_id = str(uuid.uuid4())
+        tenant_id = str(uuid.uuid4())
+        
+        # 12,000 characters (exceeds 8,000 threshold)
+        oversized_content = "X" * 12000
+        
+        result = await svc.ingest_card(
+            collection_name="test_collection",
+            content=oversized_content,
+            card_id=card_id,
+            tenant_id=tenant_id,
+            card_type="Analysis",
+        )
+        
+        assert result.status.value == "done"
+        assert result.document_id == card_id
+        
+        # delete was called to purge prior points
+        mock_client.delete.assert_called_once()
+        
+        # upsert called multiple times (one call per chunk)
+        assert mock_client.upsert.call_count > 1
+        
+        # Let's inspect the upsert calls
+        all_upserted_points = []
+        for call in mock_client.upsert.call_args_list:
+            all_upserted_points.extend(call[1]["points"])
+            
+        assert len(all_upserted_points) > 1
+        
+        # Verify chunk 0 deterministic UUID
+        expected_chunk_0_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{card_id}_chunk_0"))
+        expected_chunk_1_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{card_id}_chunk_1"))
+        
+        assert all_upserted_points[0].id == expected_chunk_0_uuid
+        assert all_upserted_points[1].id == expected_chunk_1_uuid
+        
+        # Verify parent tracking attributes are preserved
+        meta_0 = all_upserted_points[0].payload["metadata"]
+        assert meta_0["card_id"] == card_id
+        assert meta_0["parent_card_id"] == card_id
+        assert meta_0["is_chunk"] is True
+        assert meta_0["chunk_index"] == 0
+        
+        meta_1 = all_upserted_points[1].payload["metadata"]
+        assert meta_1["card_id"] == card_id
+        assert meta_1["parent_card_id"] == card_id
+        assert meta_1["is_chunk"] is True
+        assert meta_1["chunk_index"] == 1
