@@ -242,7 +242,7 @@ async def test_ingest_oversized_card_chunks_deterministically(mock_embeddings, m
             content=oversized_content,
             card_id=card_id,
             tenant_id=tenant_id,
-            card_type="Analysis",
+            card_type="Decision",
         )
         
         assert result.status.value == "done"

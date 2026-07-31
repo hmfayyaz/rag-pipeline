@@ -5,6 +5,7 @@ RAGAS evaluation runner command.
 import click
 from uuid import UUID
 import asyncio
+import json
 from app.commands import command, info, success, error
 from app.api.deps import get_db_context
 from app.services.rag.retrieval import RetrievalService
@@ -16,7 +17,8 @@ from app.core.config import settings
 @command("rag-evaluate", help="Run RAGAS accuracy evaluation against a set of golden questions")
 @click.option("--collection", "-c", default="documents", help="Collection name to search")
 @click.option("--tenant-id", "-t", default=None, help="Tenant UUID context")
-def rag_evaluate(collection: str, tenant_id: str | None) -> None:
+@click.option("--output", "-o", default="evaluation_report.json", help="Path to save the JSON evaluation report")
+def rag_evaluate(collection: str, tenant_id: str | None, output: str) -> None:
     """
     Evaluate retrieval and generation accuracy.
     
@@ -26,10 +28,10 @@ def rag_evaluate(collection: str, tenant_id: str | None) -> None:
     info("Starting RAGAS evaluation runner...")
     
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(run_evaluation(collection, tenant_id))
+    loop.run_until_complete(run_evaluation(collection, tenant_id, output))
 
 
-async def run_evaluation(collection: str, tenant_str: str | None) -> None:
+async def run_evaluation(collection: str, tenant_str: str | None, output_path: str) -> None:
     from sqlalchemy import select
     from app.db.models.organization import Organization
     
@@ -79,6 +81,7 @@ async def run_evaluation(collection: str, tenant_str: str | None) -> None:
         
         total_faithfulness = 0.0
         total_relevance = 0.0
+        evaluation_items = []
         
         for i, item in enumerate(golden_questions):
             q = item["question"]
@@ -115,6 +118,16 @@ async def run_evaluation(collection: str, tenant_str: str | None) -> None:
             total_faithfulness += faithfulness
             total_relevance += relevance
             
+            evaluation_items.append({
+                "question": q,
+                "ground_truth": gt,
+                "citations_count": len(results),
+                "metrics": {
+                    "faithfulness": round(faithfulness, 2),
+                    "context_relevance": round(relevance, 2)
+                }
+            })
+            
             click.echo(f"[{i + 1}] Q: {q}")
             click.echo(f"    Citations found: {len(results)}")
             click.echo(f"    Faithfulness Score: {faithfulness:.2f}")
@@ -132,4 +145,20 @@ async def run_evaluation(collection: str, tenant_str: str | None) -> None:
         click.echo(f"Overall Accuracy Status: {'PASSED (>= 0.80)' if avg_faithfulness >= 0.8 else 'FAILED (< 0.80)'}")
         click.echo("=" * 40)
         
+        # Save evaluation report
+        report = {
+            "collection": collection,
+            "tenant_id": str(tenant_id),
+            "summary": {
+                "average_faithfulness": round(avg_faithfulness, 2),
+                "average_context_relevance": round(avg_relevance, 2),
+                "status": "PASSED" if avg_faithfulness >= 0.8 else "FAILED"
+            },
+            "evaluations": evaluation_items
+        }
+        
+        with open(output_path, "w", encoding="utf-8") as f_out:
+            json.dump(report, f_out, indent=2)
+            
+        info(f"Evaluation report successfully saved to: {output_path}")
         success("Evaluation run completed successfully!")

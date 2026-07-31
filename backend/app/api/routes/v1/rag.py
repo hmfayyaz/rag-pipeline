@@ -237,10 +237,15 @@ async def query_knowledge_base(
         "language": request.language,
     }
 
+    # Collection-per-area mapping strategy
+    target_collection = request.collection_name
+    if request.area and request.collection_name in ("documents", "default"):
+        target_collection = request.area.lower().strip()
+
     # 1. Retrieve security-filtered document chunks
     results = await retrieval_service.retrieve(
         query=request.query,
-        collection_name=request.collection_name,
+        collection_name=target_collection,
         limit=request.limit,
         min_score=request.min_score,
         use_reranker=request.use_reranker,
@@ -259,7 +264,7 @@ async def query_knowledge_base(
         action="rag_retrieval_query",
         organization_id=active_org.id,
         target_type="rag_collection",
-        target_id=request.collection_name,
+        target_id=target_collection,
         details={
             "query_length": len(request.query),
             "user_role": role,
@@ -455,6 +460,11 @@ async def ingest_card(
     from datetime import datetime
     from app.services.rag.ingestion import IngestionService
     
+    # Collection-per-area mapping strategy
+    target_collection = name
+    if request.area and name in ("documents", "default"):
+        target_collection = request.area.lower().strip()
+        
     source_created_at_dt = None
     if request.source_created_at:
         try:
@@ -470,7 +480,7 @@ async def ingest_card(
             pass
 
     rag_doc = await rag_doc_svc.create_document(
-        collection_name=name,
+        collection_name=target_collection,
         filename=f"card_{request.card_id}.txt",
         filesize=len(request.content.encode("utf-8")),
         filetype="txt",
@@ -484,12 +494,12 @@ async def ingest_card(
         # Pass all card details
         card_id=UUID(request.card_id),
         tenant_id=active_org.id,
-        card_type=request.type,
-        card_status=request.status,
+        card_type=request.type.value,
+        card_status=request.status.value,
         version=request.version,
         project=request.project,
         tags=request.tags,
-        confidence=request.confidence,
+        confidence=request.confidence.value if request.confidence else None,
         owner=request.owner,
         source_pointer=request.source_pointer,
         source_checksum=request.source_checksum,
@@ -503,17 +513,17 @@ async def ingest_card(
     
     ingestion_service = IngestionService.from_settings()
     result = await ingestion_service.ingest_card(
-        collection_name=name,
+        collection_name=target_collection,
         content=request.content,
         card_id=request.card_id,
         tenant_id=str(active_org.id),
-        card_type=request.type,
-        card_status=request.status,
+        card_type=request.type.value,
+        card_status=request.status.value,
         version=request.version,
         area=request.area,
         project=request.project,
         tags=request.tags,
-        confidence=request.confidence,
+        confidence=request.confidence.value if request.confidence else None,
         owner=request.owner,
         language=request.language,
         confidentiality=request.confidentiality,
@@ -536,7 +546,7 @@ async def ingest_card(
             id=str(rag_doc.id),
             status="done",
             filename=f"card_{request.card_id}.txt",
-            collection=name,
+            collection=target_collection,
             message="Card successfully ingested.",
         )
     else:

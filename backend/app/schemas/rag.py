@@ -1,10 +1,35 @@
 """RAG API schemas."""
 
 from typing import Any
-
+from enum import Enum
 from pydantic import Field, field_validator
 
 from app.schemas.base import BaseSchema
+
+
+class CardType(str, Enum):
+    PROCESS = "Process"
+    DECISION = "Decision"
+    PROMPT = "Prompt"
+    LESSON = "Lesson"
+    WORKFLOW = "Workflow"
+    KNOWN_ISSUE = "Known Issue"
+
+
+class CardStatus(str, Enum):
+    DRAFT = "draft"
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    SUPERSEDED = "superseded"
+    OBSOLETE = "obsolete"
+    ARCHIVED = "archived"
+
+
+class ConfidenceVocabulary(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
 
 
 class RAGSearchRequest(BaseSchema):
@@ -254,13 +279,13 @@ class RAGCardIngestRequest(BaseSchema):
 
     card_id: str = Field(..., description="Canonical card identity issued by Postgres registry")
     content: str = Field(..., description="Raw text content of the Knowledge Card")
-    type: str = Field(..., description="Card type")
-    status: str = Field(default="approved", description="draft / proposed / approved / superseded / obsolete / archived")
+    type: CardType = Field(..., description="Card type")
+    status: CardStatus = Field(default=CardStatus.APPROVED, description="draft / proposed / approved / superseded / obsolete / archived")
     version: int = Field(default=1, description="Version number")
     area: str | None = Field(None, description="Business area")
     project: str | None = Field(None, description="Associated project")
     tags: list[str] | None = Field(None, description="Free tags")
-    confidence: str | None = Field(None, description="Confidence level")
+    confidence: ConfidenceVocabulary | None = Field(None, description="Confidence level")
     confidentiality: str = Field(default="public", description="Confidentiality level")
     owner: str | None = Field(None, description="Knowledge Owner")
     language: str = Field(default="en", description="Content language")

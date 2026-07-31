@@ -1,0 +1,38 @@
+{
+  "collection": "documents",
+  "tenant_id": "9015e62b-8d76-4d10-a1cc-190a3bc73034",
+  "summary": {
+    "average_faithfulness": 0.0,
+    "average_context_relevance": 0.0,
+    "status": "FAILED"
+  },
+  "evaluations": [
+    {
+      "question": "What is the net profit in the quarterly finance report?",
+      "ground_truth": "The net profit is $4.2M.",
+      "citations_count": 0,
+      "metrics": {
+        "faithfulness": 0.0,
+        "context_relevance": 0.0
+      }
+    },
+    {
+      "question": "What is the security classification rule?",
+      "ground_truth": "Viewer roles are strictly prohibited from viewing high confidentiality cards.",
+      "citations_count": 0,
+      "metrics": {
+        "faithfulness": 0.0,
+        "context_relevance": 0.0
+      }
+    },
+    {
+      "question": "Who is the lead system architect?",
+      "ground_truth": "Saad Shahrour is the AI Platform Lead.",
+      "citations_count": 0,
+      "metrics": {
+        "faithfulness": 0.0,
+        "context_relevance": 0.0
+      }
+    }
+  ]
+}
