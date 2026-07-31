@@ -152,7 +152,7 @@ def test_build_security_filter_confidentiality_restriction(mock_vector_store, mo
 
 
 def test_build_security_filter_status_override(mock_vector_store, mock_rag_settings):
-    """Verify status filter overrides are permitted for admins/owners but ignored for viewers."""
+    """Verify status filter overrides are ignored for all roles until Auth details are available."""
     svc = RetrievalService(mock_vector_store, mock_rag_settings)
     
     tenant_id = str(uuid.uuid4())
@@ -164,8 +164,8 @@ def test_build_security_filter_status_override(mock_vector_store, mock_rag_setti
         current_user_id=str(uuid.uuid4()),
         status_filter=["proposed", "approved"]
     )
-    assert "proposed" in q_filter_admin.must[1].match.any
-    assert "approved" in q_filter_admin.must[1].match.any
+    # Always strictly "approved"
+    assert q_filter_admin.must[1].match.any == ["approved"]
 
     # Viewer tries to override status filter
     q_filter_viewer = svc._build_security_filter(
@@ -174,7 +174,7 @@ def test_build_security_filter_status_override(mock_vector_store, mock_rag_setti
         current_user_id=str(uuid.uuid4()),
         status_filter=["draft", "proposed"]
     )
-    # Ignored: viewer should still only get "approved"
+    # Always strictly "approved"
     assert q_filter_viewer.must[1].match.any == ["approved"]
 
 
@@ -280,3 +280,68 @@ async def test_retrieve_collapses_sibling_chunks(mock_vector_store, mock_rag_set
     assert len(results) == 2
     assert results[0].content == "Chunk 0 content"
     assert results[1].content == "Other card content"
+
+
+def test_retrieve_enforces_strictly_approved_status(mock_vector_store, mock_rag_settings):
+    """Verify that retrieval strictly forces approved status filter and ignores caller attempts to override."""
+    svc = RetrievalService(mock_vector_store, mock_rag_settings)
+    
+    tenant_id = str(uuid.uuid4())
+    user_id = str(uuid.uuid4())
+    
+    q_filter = svc._build_security_filter(
+        tenant_id=tenant_id,
+        role="admin",
+        current_user_id=user_id,
+        status_filter=["draft", "obsolete"]
+    )
+    
+    # Verify status is strictly set to approved despite override attempt
+    status_condition = q_filter.must[1]
+    assert status_condition.key == "metadata.status"
+    assert status_condition.match.any == ["approved"]
+
+
+@pytest.mark.anyio
+async def test_area_based_collection_routing(mock_vector_store, mock_rag_settings):
+    """Verify that area-based collection routing maps default collection to area value dynamically."""
+    from app.api.routes.v1.rag import query_knowledge_base
+    from app.schemas.rag import RAGQueryRequest
+    from unittest.mock import MagicMock, AsyncMock
+    
+    retrieval_service = MagicMock(spec=RetrievalService)
+    retrieval_service.retrieve = AsyncMock(return_value=[])
+    
+    request_data = RAGQueryRequest(
+        collection_name="documents",
+        query="test query",
+        area="legal",
+    )
+    
+    # We mock dependency objects
+    current_user = MagicMock()
+    current_user.id = uuid.uuid4()
+    active_org = MagicMock()
+    active_org.id = uuid.uuid4()
+    
+    db = AsyncMock()
+    member_repo_mock = MagicMock()
+    member_repo_mock.get = AsyncMock(return_value=None)
+    
+    with patch("app.repositories.member_repo", member_repo_mock), \
+         patch("app.core.audit.record_audit", AsyncMock()), \
+         patch("langchain_openai.ChatOpenAI") as mock_openai:
+         
+        # Execute query endpoint
+        res = await query_knowledge_base(
+            request=request_data,
+            retrieval_service=retrieval_service,
+            current_user=current_user,
+            active_org=active_org,
+            db=db
+        )
+        
+        # Verify collection was routed from "documents" to the specific area "legal"
+        retrieval_service.retrieve.assert_called_once()
+        called_args = retrieval_service.retrieve.call_args[1]
+        assert called_args["collection_name"] == "legal"

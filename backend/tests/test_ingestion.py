@@ -280,3 +280,79 @@ async def test_ingest_oversized_card_chunks_deterministically(mock_embeddings, m
         assert meta_1["parent_card_id"] == card_id
         assert meta_1["is_chunk"] is True
         assert meta_1["chunk_index"] == 1
+
+
+@pytest.mark.anyio
+async def test_card_id_idempotent_upsert():
+    """Verify same card_id updates the existing RAGDocument in place without duplicates."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.services.rag_document import RAGDocumentService
+    from app.db.models.rag_document import RAGDocument
+    
+    db = MagicMock(spec=AsyncSession)
+    
+    card_id = uuid.uuid4()
+    org_id = uuid.uuid4()
+    
+    mock_existing_doc = RAGDocument(
+        card_id=card_id,
+        filename="old.txt",
+        project="Old Project",
+        version=1,
+    )
+    
+    db_result = MagicMock()
+    db_result.scalar_one_or_none = MagicMock(return_value=mock_existing_doc)
+    db.execute = AsyncMock(return_value=db_result)
+    db.flush = AsyncMock()
+    db.refresh = AsyncMock()
+    
+    svc = RAGDocumentService(db)
+    
+    res_doc = await svc.create_document(
+        collection_name="documents",
+        filename="new.txt",
+        filesize=200,
+        filetype="txt",
+        organization_id=org_id,
+        card_id=card_id,
+        version=2,
+        project="New Project",
+        card_type="Decision",
+        card_status="approved",
+    )
+    
+    assert res_doc == mock_existing_doc
+    assert res_doc.filename == "new.txt"
+    assert res_doc.project == "New Project"
+    assert res_doc.version == 2
+
+
+def test_vocabulary_validation():
+    """Verify that Pydantic validation rejects invalid status, type, and confidence values."""
+    from pydantic import ValidationError
+    from app.schemas.rag import RAGCardIngestRequest
+    
+    valid_data = {
+        "card_id": str(uuid.uuid4()),
+        "content": "some content",
+        "type": "Decision",
+        "status": "approved",
+        "confidence": "high",
+        "area": "finance",
+    }
+    
+    req = RAGCardIngestRequest(**valid_data)
+    assert req.type.value == "Decision"
+    
+    # Invalid card type
+    invalid_data = valid_data.copy()
+    invalid_data["type"] = "InvalidType"
+    with pytest.raises(ValidationError):
+        RAGCardIngestRequest(**invalid_data)
+        
+    # Invalid card status
+    invalid_data = valid_data.copy()
+    invalid_data["status"] = "active"
+    with pytest.raises(ValidationError):
+        RAGCardIngestRequest(**invalid_data)

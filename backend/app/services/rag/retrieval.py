@@ -159,19 +159,9 @@ class RetrievalService(BaseRetrievalService):
         ]
 
         # Enforce status filter: normal query returns approved cards only, by default.
-        allowed_statuses = ["approved"]
-        if status_filter:
-            # Only Admins/Owners have permission to override the status filter
-            if role in ["admin", "owner"]:
-                allowed_statuses = status_filter
-            else:
-                logger.warning(
-                    f"[RETRIEVAL] Role '{role}' has no permission to override status filter to {status_filter}. "
-                    "Restricting query to 'approved' status only."
-                )
-
+        # As per F2 Blueprint: Do not implement role override behavior until Auth details are available.
         must_conditions.append(
-            FieldCondition(key="metadata.status", match=MatchAny(any=allowed_statuses))
+            FieldCondition(key="metadata.status", match=MatchAny(any=["approved"]))
         )
 
         # RBAC permissions filtering

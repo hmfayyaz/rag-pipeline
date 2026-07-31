@@ -135,10 +135,40 @@ class RAGDocumentService:
             from sqlalchemy import select
             stmt = select(RAGDocument).where(RAGDocument.card_id == card_id)
             res = await self.db.execute(stmt)
-            existing = res.scalars().all()
-            for old_doc in existing:
-                await self.db.delete(old_doc)
-            await self.db.flush()
+            existing_doc = res.scalar_one_or_none()
+            if existing_doc:
+                existing_doc.collection_name = collection_name
+                existing_doc.filename = filename
+                existing_doc.filesize = filesize
+                existing_doc.filetype = filetype
+                existing_doc.storage_path = storage_path or ""
+                existing_doc.organization_id = organization_id
+                existing_doc.knowledge_base_id = knowledge_base_id
+                existing_doc.owner_id = owner_id
+                existing_doc.area = area
+                existing_doc.language = language
+                existing_doc.confidentiality = confidentiality
+                existing_doc.permissions = permissions
+                existing_doc.tenant_id = tenant_id
+                existing_doc.card_type = card_type
+                existing_doc.card_status = card_status
+                existing_doc.version = version
+                existing_doc.project = project
+                existing_doc.tags = tags
+                existing_doc.confidence = confidence
+                existing_doc.owner = owner
+                existing_doc.source_pointer = source_pointer
+                existing_doc.source_checksum = source_checksum
+                existing_doc.source_created_at = source_created_at
+                existing_doc.document_id = document_id
+                existing_doc.next_review_at = next_review_at
+                existing_doc.is_chunk = is_chunk
+                existing_doc.parent_card_id = parent_card_id
+                existing_doc.chunk_index = chunk_index
+                
+                await self.db.flush()
+                await self.db.refresh(existing_doc)
+                return existing_doc
 
         return await rag_document_repo.create(
             self.db,
