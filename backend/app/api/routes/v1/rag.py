@@ -280,6 +280,13 @@ async def query_knowledge_base(
             filename=hit.metadata.get("filename", "Unknown"),
             page_num=hit.metadata.get("page_num"),
             parent_doc_id=hit.parent_doc_id,
+            card_id=str(hit.metadata.get("card_id")) if hit.metadata.get("card_id") else None,
+            tenant_id=str(hit.metadata.get("tenant_id")) if hit.metadata.get("tenant_id") else None,
+            card_type=hit.metadata.get("card_type"),
+            card_status=hit.metadata.get("card_status"),
+            version=hit.metadata.get("version"),
+            project=hit.metadata.get("project"),
+            source_pointer=hit.metadata.get("source_pointer"),
         )
         for hit in results
     ]
