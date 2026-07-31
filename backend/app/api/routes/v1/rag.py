@@ -251,6 +251,27 @@ async def query_knowledge_base(
         custom_filters=query_custom_filters,
     )
 
+    # 1.1. Log the access-decision details for auditing
+    from app.core.audit import record_audit
+    await record_audit(
+        db=db,
+        actor_user_id=current_user.id,
+        action="rag_retrieval_query",
+        organization_id=active_org.id,
+        target_type="rag_collection",
+        target_id=request.collection_name,
+        details={
+            "query_length": len(request.query),
+            "user_role": role,
+            "tenant_id": str(active_org.id),
+            "allowed_roles": ["viewer", "member", "admin", "owner"],
+            "confidentiality_policy": "confidentiality == 'high' strictly restricted to owner or org admin/owner",
+            "status_filter": request.status or "approved",
+            "decision": "allow",
+            "result_count": len(results),
+        }
+    )
+
     # 2. Build citations list
     citations = [
         RAGQueryCitation(
