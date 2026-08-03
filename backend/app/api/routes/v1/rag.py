@@ -206,6 +206,28 @@ async def search_documents(
             status_filter=request.status,
             custom_filters=custom_filters,
         )
+    # Log the access-decision details for auditing
+    from app.core.audit import record_audit
+    target_id = request.collection_name if not request.collection_names else ",".join(request.collection_names)
+    await record_audit(
+        db=db,
+        actor_user_id=current_user.id,
+        action="rag_retrieval_search",
+        organization_id=active_org.id,
+        target_type="rag_collection",
+        target_id=target_id,
+        details={
+            "query_length": len(request.query),
+            "user_role": role,
+            "tenant_id": str(active_org.id),
+            "allowed_roles": ["viewer", "member", "admin", "owner"],
+            "confidentiality_policy": "confidentiality == 'high' strictly restricted to owner or org admin/owner",
+            "status_filter": request.status or "approved",
+            "decision": "allow",
+            "result_count": len(results),
+        }
+    )
+
     api_results = [RAGSearchResult(**hit.model_dump()) for hit in results]
     return RAGSearchResponse(results=api_results)
 

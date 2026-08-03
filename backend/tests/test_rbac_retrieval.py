@@ -152,29 +152,27 @@ def test_build_security_filter_confidentiality_restriction(mock_vector_store, mo
 
 
 def test_build_security_filter_status_override(mock_vector_store, mock_rag_settings):
-    """Verify status filter overrides are ignored for all roles until Auth details are available."""
+    """Verify status filter overrides are allowed for admin/owner but denied for other roles."""
     svc = RetrievalService(mock_vector_store, mock_rag_settings)
     
     tenant_id = str(uuid.uuid4())
     
-    # Admin tries to query proposed and approved status
+    # Admin tries to query proposed and approved status -> allowed
     q_filter_admin = svc._build_security_filter(
         tenant_id=tenant_id,
         role="admin",
         current_user_id=str(uuid.uuid4()),
         status_filter=["proposed", "approved"]
     )
-    # Always strictly "approved"
-    assert q_filter_admin.must[1].match.any == ["approved"]
+    assert q_filter_admin.must[1].match.any == ["proposed", "approved"]
 
-    # Viewer tries to override status filter
+    # Viewer tries to override status filter -> denied, forced to ["approved"]
     q_filter_viewer = svc._build_security_filter(
         tenant_id=tenant_id,
         role="viewer",
         current_user_id=str(uuid.uuid4()),
         status_filter=["draft", "proposed"]
     )
-    # Always strictly "approved"
     assert q_filter_viewer.must[1].match.any == ["approved"]
 
 
@@ -283,7 +281,7 @@ async def test_retrieve_collapses_sibling_chunks(mock_vector_store, mock_rag_set
 
 
 def test_retrieve_enforces_strictly_approved_status(mock_vector_store, mock_rag_settings):
-    """Verify that retrieval strictly forces approved status filter and ignores caller attempts to override."""
+    """Verify that retrieval strictly forces approved status filter for unprivileged roles and ignores override attempts."""
     svc = RetrievalService(mock_vector_store, mock_rag_settings)
     
     tenant_id = str(uuid.uuid4())
@@ -291,7 +289,7 @@ def test_retrieve_enforces_strictly_approved_status(mock_vector_store, mock_rag_
     
     q_filter = svc._build_security_filter(
         tenant_id=tenant_id,
-        role="admin",
+        role="viewer",
         current_user_id=user_id,
         status_filter=["draft", "obsolete"]
     )

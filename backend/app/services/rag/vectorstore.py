@@ -96,6 +96,16 @@ class BaseVectorStore(ABC):
             "chunk_num": chunk.chunk_num,
             **document.metadata.model_dump(),
         }
+        
+        # If the document contains multiple chunks, ensure they are flagged as chunks referencing their parent
+        total_chunks = len(document.chunked_pages) if document.chunked_pages else 0
+        if total_chunks > 1:
+            meta["is_chunk"] = True
+            meta["parent_card_id"] = document.metadata.card_id or document.id
+            meta["chunk_index"] = chunk.chunk_num
+        else:
+            meta["is_chunk"] = meta.get("is_chunk") or False
+
         # Align keys with blueprint Qdrant payload requirements
         if "card_status" in meta:
             meta["status"] = meta.pop("card_status")
@@ -214,6 +224,87 @@ class QdrantVectorStore(BaseVectorStore):
                 field_name="metadata.owner",
                 field_schema="keyword",
             )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.card_id",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.type",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.status",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.version",
+                field_schema="integer",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.project",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.tags",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.confidence",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.language",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.source_created_at",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.document_id",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.created_at",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.updated_at",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.next_review_at",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.is_chunk",
+                field_schema="bool",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.parent_card_id",
+                field_schema="keyword",
+            )
+            await self.client.create_payload_index(
+                collection_name=name,
+                field_name="metadata.chunk_index",
+                field_schema="integer",
+            )
+
 
     async def insert_document(self, collection_name: str, document: Document) -> None:
         await self._ensure_collection(collection_name)
