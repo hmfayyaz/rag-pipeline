@@ -396,6 +396,7 @@ class QdrantVectorStore(BaseVectorStore):
         await self.client.delete_collection(collection_name)
 
     async def delete_document(self, collection_name: str, document_id: str) -> None:
+        await self._ensure_collection(collection_name)
         sanitized = self._sanitize_id(document_id)
         await self.client.delete(
             collection_name=collection_name,
@@ -407,6 +408,7 @@ class QdrantVectorStore(BaseVectorStore):
         )
 
     async def delete_card(self, collection_name: str, card_id: str) -> None:
+        await self._ensure_collection(collection_name)
         sanitized = self._sanitize_id(card_id)
         await self.client.delete(
             collection_name=collection_name,
