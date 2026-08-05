@@ -271,25 +271,35 @@ class RetrievalService(BaseRetrievalService):
                     FieldCondition(key="parent_doc_id", match=MatchValue(value=m.group(1)))
                 )
 
-        pipeline_results = await self.store.search(
-            collection_name=collection_name,
-            query=query,
-            limit=limit * fetch_multiplier,
-            query_filter=qdrant_filter,
-        )
+        from qdrant_client.http.exceptions import UnexpectedResponse
+        try:
+            pipeline_results = await self.store.search(
+                collection_name=collection_name,
+                query=query,
+                limit=limit * fetch_multiplier,
+                query_filter=qdrant_filter,
+            )
 
-        search_time = time.time() - start_time
-        logger.info(
-            "[RETRIEVAL] Vector search completed in %.3fs, found %d results",
-            search_time,
-            len(pipeline_results),
-        )
+            search_time = time.time() - start_time
+            logger.info(
+                "[RETRIEVAL] Vector search completed in %.3fs, found %d results",
+                search_time,
+                len(pipeline_results),
+            )
 
-        if self._hybrid_enabled:
-            bm25_results = await self._bm25_search(query, collection_name, limit * fetch_multiplier)
-            if bm25_results:
-                pipeline_results = self._rrf_fuse(pipeline_results, bm25_results)
-                logger.info("[RETRIEVAL] Hybrid search: fused %d results", len(pipeline_results))
+            if self._hybrid_enabled:
+                bm25_results = await self._bm25_search(query, collection_name, limit * fetch_multiplier)
+                if bm25_results:
+                    pipeline_results = self._rrf_fuse(pipeline_results, bm25_results)
+                    logger.info("[RETRIEVAL] Hybrid search: fused %d results", len(pipeline_results))
+        except UnexpectedResponse as e:
+            if e.status_code == 404:
+                logger.warning(
+                    "[RETRIEVAL] Collection '%s' does not exist in Qdrant. Returning empty results.",
+                    collection_name
+                )
+                return []
+            raise
 
         for i, r in enumerate(pipeline_results[:3]):
             logger.debug(
