@@ -5,6 +5,7 @@ Comparison of this repository against Schedule A milestones and regulations in [
 Related docs (not duplicated here):
 
 - Design intent: [`f2-platform-design.md`](f2-platform-design.md)
+- **Build guide (M1–M3, client metadata/RBAC):** [`m1-m3-implementation-guide.md`](m1-m3-implementation-guide.md)
 - Implementation notes: [`../backend/docs/knowledge_cards.md`](../backend/docs/knowledge_cards.md)
 - Run / Swagger walkthrough: [`../RAG_PIPELINE_GUIDE.md`](../RAG_PIPELINE_GUIDE.md)
 - Project overview: [`../README.md`](../README.md)
